@@ -351,13 +351,19 @@ export const GuestsTab: React.FC<GuestsTabProps> = ({
           <h3 className="text-base font-bold text-slate-900 mb-1">
             Add Guest &amp; Party
           </h3>
-          <p className="text-xs text-slate-500 mb-4">
+          <p id="guest-form-help" className="text-xs text-slate-500 mb-4">
             Register an invitee, party size, and dietary preference.
           </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          <form
+            onSubmit={handleSubmit}
+            aria-describedby="guest-form-help"
+            className="space-y-4"
+            noValidate
+          >
             {formError && (
               <div
+                id="guest-form-error"
                 role="alert"
                 className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium"
               >
@@ -376,8 +382,10 @@ export const GuestsTab: React.FC<GuestsTabProps> = ({
                 id="guest-fullname"
                 type="text"
                 value={fullName}
+                aria-label="Guest full name"
+                aria-describedby="guest-form-help"
                 onChange={(e) => setFullName(e.target.value)}
-                placeholder="e.g.,Professor Alistair Finch"
+                placeholder="e.g., Professor Alistair Finch"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
             </div>
@@ -393,6 +401,8 @@ export const GuestsTab: React.FC<GuestsTabProps> = ({
                 id="guest-email"
                 type="email"
                 value={email}
+                aria-label="Guest email address"
+                aria-describedby="guest-form-help"
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="alistair@oxford.ac.uk"
                 className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -411,6 +421,8 @@ export const GuestsTab: React.FC<GuestsTabProps> = ({
                   id="guest-group"
                   type="text"
                   value={group}
+                  aria-label="Guest affiliation or group"
+                  aria-describedby="guest-form-help"
                   onChange={(e) => setGroup(e.target.value)}
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -426,6 +438,8 @@ export const GuestsTab: React.FC<GuestsTabProps> = ({
                 <select
                   id="guest-rsvp"
                   value={rsvpStatus}
+                  aria-label="Initial RSVP status"
+                  aria-describedby="guest-form-help"
                   onChange={(e) => setRsvpStatus(e.target.value as RsvpStatus)}
                   className="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
                 >
@@ -450,6 +464,8 @@ export const GuestsTab: React.FC<GuestsTabProps> = ({
                   min={0}
                   max={10}
                   value={plusOnes}
+                  aria-label="Number of plus-ones"
+                  aria-describedby="guest-form-help"
                   onChange={(e) => setPlusOnes(e.target.value)}
                   className="w-full px-2.5 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -465,6 +481,8 @@ export const GuestsTab: React.FC<GuestsTabProps> = ({
                 <select
                   id="guest-dietary"
                   value={dietary}
+                  aria-label="Dietary restriction"
+                  aria-describedby="guest-form-help"
                   onChange={(e) =>
                     setDietary(e.target.value as DietaryRestriction)
                   }
@@ -490,6 +508,8 @@ export const GuestsTab: React.FC<GuestsTabProps> = ({
                   min={1}
                   max={20}
                   value={tableNumber}
+                  aria-label="Assigned table number"
+                  aria-describedby="guest-form-help"
                   onChange={(e) => setTableNumber(e.target.value)}
                   className="w-full px-2.5 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -498,6 +518,7 @@ export const GuestsTab: React.FC<GuestsTabProps> = ({
 
             <button
               type="submit"
+              aria-label="Add guest to manifest"
               className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
             >
               <UserPlus className="w-4 h-4" />

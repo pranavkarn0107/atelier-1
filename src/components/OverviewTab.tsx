@@ -13,6 +13,7 @@ import {
 import { CelebrationEvent, EventTask } from '../types/event';
 import {
   BudgetMetrics,
+  evaluateVendorCheckpoints,
   GuestMetrics,
   ReadinessSummary,
   TaskMetrics,
@@ -47,6 +48,11 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   const [simulatedHeadcount, setSimulatedHeadcount] = useState<number | null>(null);
   const activeSimGuests =
     simulatedHeadcount !== null ? simulatedHeadcount : guestMetrics.confirmedHeadcount;
+
+  const vendorCheckpoints = evaluateVendorCheckpoints(
+    event.tasks,
+    event.budgetItems
+  );
 
   const projectedVariableCost =
     Math.round(budgetMetrics.variablePerGuestRateSum * activeSimGuests * 100) / 100;
@@ -452,7 +458,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                   </button>
                 )}
             </div>
-            <p className="text-xs text-slate-500 mb-4">
+            <p id="headcount-sim-desc" className="text-xs text-slate-500 mb-4">
               Slide to model how guest count changes affect per-person catering, beverage, and stationery line items.
             </p>
 
@@ -476,6 +482,8 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                   max={200}
                   step={1}
                   value={activeSimGuests}
+                  aria-label="Simulated guest headcount"
+                  aria-describedby="headcount-sim-desc"
                   onChange={(e) => setSimulatedHeadcount(Number(e.target.value))}
                   className="w-full accent-slate-900 cursor-pointer"
                 />
@@ -529,38 +537,77 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             </div>
           </div>
 
-          {/* Spend by Category */}
-          <div className="bg-white rounded-xl border border-slate-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-bold text-slate-900">
-                Budget Allocation by Category
-              </h2>
-              <button
-                type="button"
-                onClick={() => onNavigateTab('budget')}
-                className="text-xs font-semibold text-slate-900 hover:underline cursor-pointer"
-              >
-                Edit Ledger
-              </button>
+          {/* Spend by Category & Vendor Verification Checkpoints */}
+          <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-base font-bold text-slate-900">
+                  Budget Allocation by Category
+                </h2>
+                <button
+                  type="button"
+                  aria-label="Open Budget tab to edit ledger"
+                  onClick={() => onNavigateTab('budget')}
+                  className="text-xs font-semibold text-slate-900 hover:underline cursor-pointer"
+                >
+                  Edit Ledger
+                </button>
+              </div>
+              <div className="space-y-3.5">
+                {budgetMetrics.categories.map((cat) => (
+                  <div key={cat.category} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-slate-700">{cat.category}</span>
+                      <span className="font-mono tabular-nums text-slate-600">
+                        {formatCurrency(cat.actual)}{' '}
+                        <span className="text-slate-400">({cat.shareOfActualPercent}%)</span>
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-slate-800"
+                        style={{ width: `${Math.min(100, cat.shareOfActualPercent)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="space-y-3.5">
-              {budgetMetrics.categories.map((cat) => (
-                <div key={cat.category} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium text-slate-700">{cat.category}</span>
-                    <span className="font-mono tabular-nums text-slate-600">
-                      {formatCurrency(cat.actual)}{' '}
-                      <span className="text-slate-400">({cat.shareOfActualPercent}%)</span>
+
+            <div className="pt-4 border-t border-slate-100 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  Vendor Verification Checkpoints
+                </h3>
+                <span className="text-[11px] font-mono tabular-nums text-slate-500">
+                  {vendorCheckpoints.filter((c) => c.verified).length}/
+                  {vendorCheckpoints.length} verified
+                </span>
+              </div>
+              <div className="space-y-2">
+                {vendorCheckpoints.map((chk) => (
+                  <div
+                    key={chk.id}
+                    className="flex items-start justify-between gap-2 text-xs"
+                  >
+                    <div>
+                      <div className="font-medium text-slate-800">
+                        {chk.label}
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        {chk.statusNote}
+                      </div>
+                    </div>
+                    <span
+                      className={`font-mono text-[11px] font-semibold shrink-0 ${
+                        chk.verified ? 'text-emerald-700' : 'text-amber-700'
+                      }`}
+                    >
+                      {chk.verified ? 'Verified' : 'Pending'}
                     </span>
                   </div>
-                  <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-slate-800"
-                      style={{ width: `${Math.min(100, cat.shareOfActualPercent)}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         </div>

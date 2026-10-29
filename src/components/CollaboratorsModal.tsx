@@ -145,13 +145,14 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
             <h3 className="text-sm font-bold text-slate-900">
               Invite Collaborator via Email
             </h3>
-            <p className="text-xs text-slate-500">
+            <p id="collab-invite-help" className="text-xs text-slate-500">
               Invited Co-Planners have permission to view and edit event details, tasks, and budgets.
             </p>
           </div>
 
           {inviteError && (
             <div
+              id="collab-invite-error"
               role="alert"
               className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium"
             >
@@ -170,35 +171,52 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
 
           <form
             onSubmit={handleInviteSubmit}
+            aria-describedby="collab-invite-help"
             className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5"
             noValidate
           >
             <div className="relative flex-1">
-              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <label htmlFor="collab-invite-email" className="sr-only">
+                Collaborator email address
+              </label>
+              <Mail
+                className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                aria-hidden="true"
+              />
               <input
+                id="collab-invite-email"
                 type="email"
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder="Enter colleague email (e.g., marcus@atelier-events.io)"
                 aria-label="Collaborator email address"
+                aria-describedby="collab-invite-help"
                 className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
             </div>
 
-            <select
-              aria-label="Collaborator permission role"
-              value={inviteRole}
-              onChange={(e) =>
-                setInviteRole(e.target.value as CollaboratorRole)
-              }
-              className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900"
-            >
-              <option value="co-planner">Co-Planner (View &amp; Edit)</option>
-              <option value="viewer">Viewer (Read Only)</option>
-            </select>
+            <div>
+              <label htmlFor="collab-invite-role" className="sr-only">
+                Collaborator permission role
+              </label>
+              <select
+                id="collab-invite-role"
+                aria-label="Collaborator permission role"
+                aria-describedby="collab-invite-help"
+                value={inviteRole}
+                onChange={(e) =>
+                  setInviteRole(e.target.value as CollaboratorRole)
+                }
+                className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900"
+              >
+                <option value="co-planner">Co-Planner (View &amp; Edit)</option>
+                <option value="viewer">Viewer (Read Only)</option>
+              </select>
+            </div>
 
             <button
               type="submit"
+              aria-label="Send collaborator invitation"
               className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
             >
               <UserPlus className="w-3.5 h-3.5" />
@@ -255,6 +273,7 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
         {/* Editable Event Details Section (Available to Owner & Co-Planners) */}
         <form
           onSubmit={handleSaveDetails}
+          aria-describedby="collab-details-help"
           className="pt-4 border-t border-slate-200 space-y-4"
         >
           <div className="flex items-center justify-between">
@@ -262,12 +281,12 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
               <h3 className="text-sm font-bold text-slate-900">
                 Shared Event Details
               </h3>
-              <p className="text-xs text-slate-500">
+              <p id="collab-details-help" className="text-xs text-slate-500">
                 Editable by the event owner and invited Co-Planners
               </p>
             </div>
             {detailsSavedMsg && (
-              <span className="text-xs font-medium text-emerald-700">
+              <span role="status" className="text-xs font-medium text-emerald-700">
                 {detailsSavedMsg}
               </span>
             )}
@@ -286,6 +305,8 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
                 type="text"
                 disabled={!canEdit}
                 value={name}
+                aria-label="Shared event title"
+                aria-describedby="collab-details-help"
                 onChange={(e) => setName(e.target.value)}
                 className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 disabled:bg-slate-50"
               />
@@ -303,6 +324,8 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
                 type="text"
                 disabled={!canEdit}
                 value={venueName}
+                aria-label="Shared venue name"
+                aria-describedby="collab-details-help"
                 onChange={(e) => setVenueName(e.target.value)}
                 className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 disabled:bg-slate-50"
               />
@@ -320,6 +343,8 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
                 type="text"
                 disabled={!canEdit}
                 value={city}
+                aria-label="Shared city and state"
+                aria-describedby="collab-details-help"
                 onChange={(e) => setCity(e.target.value)}
                 className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 disabled:bg-slate-50"
               />
@@ -338,6 +363,8 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
                   type="number"
                   disabled={!canEdit}
                   value={targetBudget}
+                  aria-label="Shared target budget"
+                  aria-describedby="collab-details-help"
                   onChange={(e) => setTargetBudget(e.target.value)}
                   className="w-full px-2.5 py-1.5 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 disabled:bg-slate-50"
                 />
@@ -355,6 +382,8 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
                   type="number"
                   disabled={!canEdit}
                   value={expectedGuests}
+                  aria-label="Shared expected guests"
+                  aria-describedby="collab-details-help"
                   onChange={(e) => setExpectedGuests(e.target.value)}
                   className="w-full px-2.5 py-1.5 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 disabled:bg-slate-50"
                 />
@@ -365,6 +394,7 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
           <div className="flex items-center justify-end gap-2 pt-2">
             <button
               type="button"
+              aria-label="Close collaborators modal"
               onClick={onClose}
               className="px-4 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-lg cursor-pointer"
             >
@@ -373,6 +403,7 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
             {canEdit && (
               <button
                 type="submit"
+                aria-label="Save shared event details"
                 className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Save className="w-3.5 h-3.5" />

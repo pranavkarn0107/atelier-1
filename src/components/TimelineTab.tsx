@@ -87,7 +87,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               <p className="text-xs text-slate-500 font-mono tabular-nums">
                 {timelineMetrics.blocks.length} sequential blocks ·{' '}
                 {(timelineMetrics.totalDurationMinutes / 60).toFixed(1)} hours
-                total runtime · {timelineMetrics.readinessPercent}% stage-ready
+                total runtime · {timelineMetrics.readinessPercent}% stage-ready ·{' '}
+                {timelineMetrics.recommendedBufferMinutes}m min recommended stage
+                buffer
               </p>
             </div>
           </div>
@@ -108,7 +110,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                       {block.startTime} – {block.endTime}
                     </div>
                     <div className="text-xs text-slate-500 inline-flex items-center gap-1 mt-0.5">
-                      <Clock className="w-3 h-3" />
+                      <Clock className="w-3 h-3" aria-hidden="true" />
                       {block.durationMinutes} min
                     </div>
                   </div>
@@ -121,6 +123,23 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                       <span>Zone: {block.location}</span>
                       <span aria-hidden="true">·</span>
                       <span>Cue Lead: {block.leadContact}</span>
+                      {block.bufferBeforeMinutes !== null &&
+                        block.bufferBeforeMinutes >= 0 && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span
+                              className={
+                                block.hasTightBuffer
+                                  ? 'text-amber-700 font-medium font-mono tabular-nums'
+                                  : 'text-emerald-700 font-mono tabular-nums'
+                              }
+                            >
+                              {block.bufferBeforeMinutes === 0
+                                ? 'Back-to-back stage transition (0m buffer)'
+                                : `+${block.bufferBeforeMinutes}m stage transition buffer`}
+                            </span>
+                          </>
+                        )}
                       {block.hasConflict && (
                         <>
                           <span aria-hidden="true">·</span>
@@ -174,13 +193,19 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           <h3 className="text-base font-bold text-slate-900 mb-1">
             Add Run-of-Show Block
           </h3>
-          <p className="text-xs text-slate-500 mb-4">
-            Automatically sorted chronologically with overlap detection.
+          <p id="schedule-form-help" className="text-xs text-slate-500 mb-4">
+            Sorted chronologically with overlap &amp; 15-min stage buffer checks.
           </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          <form
+            onSubmit={handleSubmit}
+            aria-describedby="schedule-form-help"
+            className="space-y-4"
+            noValidate
+          >
             {formError && (
               <div
+                id="schedule-form-error"
                 role="alert"
                 className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium"
               >
@@ -199,6 +224,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 id="schedule-title"
                 type="text"
                 value={title}
+                aria-label="Schedule cue or activity title"
+                aria-describedby="schedule-form-help"
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="e.g., After-Hours Vinyl Lounge Set"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -217,6 +244,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   id="schedule-start"
                   type="time"
                   value={startTime}
+                  aria-label="Schedule block start time"
+                  aria-describedby="schedule-form-help"
                   onChange={(e) => setStartTime(e.target.value)}
                   className="w-full px-2.5 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -233,6 +262,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   id="schedule-end"
                   type="time"
                   value={endTime}
+                  aria-label="Schedule block end time"
+                  aria-describedby="schedule-form-help"
                   onChange={(e) => setEndTime(e.target.value)}
                   className="w-full px-2.5 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -251,6 +282,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   id="schedule-location"
                   type="text"
                   value={location}
+                  aria-label="Venue zone or room"
+                  aria-describedby="schedule-form-help"
                   onChange={(e) => setLocation(e.target.value)}
                   placeholder="e.g., South Conservatory"
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -268,6 +301,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   id="schedule-lead"
                   type="text"
                   value={leadContact}
+                  aria-label="Point of contact for schedule block"
+                  aria-describedby="schedule-form-help"
                   onChange={(e) => setLeadContact(e.target.value)}
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -285,6 +320,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 id="schedule-notes"
                 type="text"
                 value={notes}
+                aria-label="AV or stage notes"
+                aria-describedby="schedule-form-help"
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Cue lighting preset 4"
                 className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -293,6 +330,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
             <button
               type="submit"
+              aria-label="Add schedule block to master run-of-show"
               className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
             >
               <Plus className="w-4 h-4" />

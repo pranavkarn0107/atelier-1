@@ -306,13 +306,19 @@ export const TasksTab: React.FC<TasksTabProps> = ({
           <h3 className="text-base font-bold text-slate-900 mb-1">
             Add Production Task
           </h3>
-          <p className="text-xs text-slate-500 mb-4">
+          <p id="task-form-help" className="text-xs text-slate-500 mb-4">
             Assign a milestone to a team lead and phase.
           </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          <form
+            onSubmit={handleSubmit}
+            aria-describedby="task-form-help"
+            className="space-y-4"
+            noValidate
+          >
             {formError && (
               <div
+                id="task-form-error"
                 role="alert"
                 className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium"
               >
@@ -331,6 +337,8 @@ export const TasksTab: React.FC<TasksTabProps> = ({
                 id="new-task-title"
                 type="text"
                 value={title}
+                aria-label="Task description"
+                aria-describedby="task-form-help"
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="e.g., Confirm harpist arrival time"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -348,6 +356,8 @@ export const TasksTab: React.FC<TasksTabProps> = ({
                 <select
                   id="new-task-phase"
                   value={phase}
+                  aria-label="Task phase"
+                  aria-describedby="task-form-help"
                   onChange={(e) => setPhase(e.target.value as TaskPhase)}
                   className="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
                 >
@@ -368,6 +378,8 @@ export const TasksTab: React.FC<TasksTabProps> = ({
                 <select
                   id="new-task-priority"
                   value={priority}
+                  aria-label="Task priority"
+                  aria-describedby="task-form-help"
                   onChange={(e) => setPriority(e.target.value as TaskPriority)}
                   className="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
                 >
@@ -390,6 +402,8 @@ export const TasksTab: React.FC<TasksTabProps> = ({
                   id="new-task-duedate"
                   type="date"
                   value={dueDate}
+                  aria-label="Task due date"
+                  aria-describedby="task-form-help"
                   onChange={(e) => setDueDate(e.target.value)}
                   className="w-full px-2.5 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -406,6 +420,8 @@ export const TasksTab: React.FC<TasksTabProps> = ({
                   id="new-task-assignee"
                   type="text"
                   value={assignee}
+                  aria-label="Task assignee"
+                  aria-describedby="task-form-help"
                   onChange={(e) => setAssignee(e.target.value)}
                   placeholder="e.g., Camille Laurent"
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -424,6 +440,8 @@ export const TasksTab: React.FC<TasksTabProps> = ({
                 id="new-task-notes"
                 type="text"
                 value={notes}
+                aria-label="Task production notes"
+                aria-describedby="task-form-help"
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Vendor contact or setup notes"
                 className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -432,6 +450,7 @@ export const TasksTab: React.FC<TasksTabProps> = ({
 
             <button
               type="submit"
+              aria-label="Add task to checklist"
               className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
             >
               <Plus className="w-4 h-4" />

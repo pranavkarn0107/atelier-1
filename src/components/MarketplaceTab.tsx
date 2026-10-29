@@ -253,13 +253,19 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
                 Save Current Event as Template
               </h3>
             </div>
-            <p className="text-xs text-slate-500 mb-4">
+            <p id="tpl-form-help" className="text-xs text-slate-500 mb-4">
               Package &ldquo;{currentEvent.name}&rdquo; to share publicly or store privately.
             </p>
 
-            <form onSubmit={handleSaveTemplate} className="space-y-4" noValidate>
+            <form
+              onSubmit={handleSaveTemplate}
+              aria-describedby="tpl-form-help"
+              className="space-y-4"
+              noValidate
+            >
               {tplError && (
                 <div
+                  id="tpl-form-error"
                   role="alert"
                   className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium"
                 >
@@ -286,6 +292,8 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
                   id="tpl-title-input"
                   type="text"
                   value={tplTitle}
+                  aria-label="Template title"
+                  aria-describedby="tpl-form-help"
                   onChange={(e) => setTplTitle(e.target.value)}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -303,6 +311,8 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
                     id="tpl-category-input"
                     type="text"
                     value={tplCategory}
+                    aria-label="Template category"
+                    aria-describedby="tpl-form-help"
                     onChange={(e) => setTplCategory(e.target.value)}
                     className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                   />
@@ -318,6 +328,8 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
                   <select
                     id="tpl-visibility-select"
                     value={tplVisibility}
+                    aria-label="Template sharing visibility"
+                    aria-describedby="tpl-form-help"
                     onChange={(e) =>
                       setTplVisibility(e.target.value as 'public' | 'private')
                     }
@@ -340,6 +352,8 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
                   id="tpl-desc-input"
                   rows={3}
                   value={tplDescription}
+                  aria-label="Template blueprint summary"
+                  aria-describedby="tpl-form-help"
                   onChange={(e) => setTplDescription(e.target.value)}
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -347,6 +361,7 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
 
               <button
                 type="submit"
+                aria-label="Save current event plan as template"
                 className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
@@ -423,6 +438,7 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
 
                   <button
                     type="button"
+                    aria-label={`Apply theme ${theme.name}`}
                     onClick={() => onSelectTheme(theme)}
                     className={`w-full py-2 px-3 text-xs font-semibold rounded-lg transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer ${
                       isSelected
@@ -443,11 +459,16 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
             <h3 className="text-base font-bold text-slate-900 mb-1">
               Create Custom UI Theme
             </h3>
-            <p className="text-xs text-slate-500 mb-4">
+            <p id="theme-form-help" className="text-xs text-slate-500 mb-4">
               Customize canvas, hero banner, and primary accent colors.
             </p>
 
-            <form onSubmit={handleCreateTheme} className="space-y-4" noValidate>
+            <form
+              onSubmit={handleCreateTheme}
+              aria-describedby="theme-form-help"
+              className="space-y-4"
+              noValidate
+            >
               {themeNotice && (
                 <div
                   role="status"
@@ -468,6 +489,8 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
                   id="custom-theme-name"
                   type="text"
                   value={themeName}
+                  aria-label="Custom theme name"
+                  aria-describedby="theme-form-help"
                   onChange={(e) => setThemeName(e.target.value)}
                   placeholder="e.g., Kyoto Autumn Cedar"
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -486,6 +509,8 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
                     id="custom-canvas-color"
                     type="color"
                     value={canvasBg}
+                    aria-label="Canvas background color"
+                    aria-describedby="theme-form-help"
                     onChange={(e) => setCanvasBg(e.target.value)}
                     className="w-full h-9 rounded border border-slate-200 cursor-pointer"
                   />
@@ -502,6 +527,8 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
                     id="custom-hero-color"
                     type="color"
                     value={heroBg}
+                    aria-label="Hero surface background color"
+                    aria-describedby="theme-form-help"
                     onChange={(e) => setHeroBg(e.target.value)}
                     className="w-full h-9 rounded border border-slate-200 cursor-pointer"
                   />
@@ -518,6 +545,8 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
                     id="custom-accent-color"
                     type="color"
                     value={primaryAccent}
+                    aria-label="Primary CTA accent color"
+                    aria-describedby="theme-form-help"
                     onChange={(e) => setPrimaryAccent(e.target.value)}
                     className="w-full h-9 rounded border border-slate-200 cursor-pointer"
                   />
@@ -535,6 +564,8 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
                   id="custom-theme-desc"
                   type="text"
                   value={themeDesc}
+                  aria-label="Custom theme style notes"
+                  aria-describedby="theme-form-help"
                   onChange={(e) => setThemeDesc(e.target.value)}
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -542,6 +573,7 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
 
               <button
                 type="submit"
+                aria-label="Save and apply custom UI theme"
                 className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Palette className="w-4 h-4" />

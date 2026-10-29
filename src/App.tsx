@@ -517,7 +517,9 @@ export default function App() {
   // Template & Theme Marketplace Handlers
   const handleSaveAsTemplate = async (template: EventTemplate) => {
     setTemplates((prev) => [template, ...prev]);
-    void syncTemplateToFirestore(template);
+    void syncTemplateToFirestore(template).catch(() => {
+      // Handled by structured Firestore error logging
+    });
     try {
       await fetch('/api/templates', {
         method: 'POST',

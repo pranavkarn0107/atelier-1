@@ -470,15 +470,17 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                     width={46}
                   />
                   <Tooltip
-                    formatter={(value: number, name: string) => [
-                      formatCurrency(Number(value)),
-                      name === 'projected'
+                    formatter={(value, name) => [
+                      formatCurrency(Number(value ?? 0)),
+                      String(name) === 'projected'
                         ? 'Projected (Estimated)'
                         : 'Actual (Committed)',
                     ]}
-                    labelFormatter={(label: string, payload) => {
-                      const item = payload?.[0]?.payload;
-                      return item?.name || label;
+                    labelFormatter={(label, payload) => {
+                      const item = payload?.[0]?.payload as
+                        | { name?: string }
+                        | undefined;
+                      return item?.name || String(label ?? '');
                     }}
                     contentStyle={{
                       backgroundColor: '#FFFFFF',
@@ -596,14 +598,19 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(value: number, _name: string, props) => {
-                    const payload = props?.payload;
+                  formatter={(value, _name, props) => {
+                    const payload = props?.payload as
+                      | {
+                          shareOfActualPercent?: number;
+                          shareOfProjectedPercent?: number;
+                        }
+                      | undefined;
                     const share =
                       pieMetricMode === 'actual'
                         ? payload?.shareOfActualPercent
                         : payload?.shareOfProjectedPercent;
                     return [
-                      `${formatCurrency(Number(value))} (${share ?? 0}%)`,
+                      `${formatCurrency(Number(value ?? 0))} (${share ?? 0}%)`,
                       pieMetricMode === 'actual'
                         ? 'Actual Spend'
                         : 'Projected Spend',
@@ -879,13 +886,19 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
           <h3 className="text-base font-bold text-slate-900 mb-1">
             Add Budget Line Item
           </h3>
-          <p className="text-xs text-slate-500 mb-4">
+          <p id="budget-form-help" className="text-xs text-slate-500 mb-4">
             Choose Fixed Fee or Per-Guest Variable scaling.
           </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          <form
+            onSubmit={handleSubmit}
+            aria-describedby="budget-form-help"
+            className="space-y-4"
+            noValidate
+          >
             {formError && (
               <div
+                id="budget-form-error"
                 role="alert"
                 className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium"
               >
@@ -904,6 +917,8 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                 id="budget-item-title"
                 type="text"
                 value={title}
+                aria-label="Expense description"
+                aria-describedby="budget-form-help"
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="e.g., Late-Night Espresso Cart"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -922,6 +937,8 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                   id="budget-item-vendor"
                   type="text"
                   value={vendor}
+                  aria-label="Vendor name"
+                  aria-describedby="budget-form-help"
                   onChange={(e) => setVendor(e.target.value)}
                   placeholder="e.g., Linea Roasters"
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -938,6 +955,8 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                 <select
                   id="budget-item-category"
                   value={category}
+                  aria-label="Budget category"
+                  aria-describedby="budget-form-help"
                   onChange={(e) =>
                     setCategory(e.target.value as BudgetCategory)
                   }
@@ -964,12 +983,21 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
             </div>
 
             <div>
-              <span className="block text-xs font-medium text-slate-700 mb-1">
+              <span
+                id="cost-calc-mode-label"
+                className="block text-xs font-medium text-slate-700 mb-1"
+              >
                 Cost Calculation Mode
               </span>
-              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-lg">
+              <div
+                role="group"
+                aria-labelledby="cost-calc-mode-label"
+                className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-lg"
+              >
                 <button
                   type="button"
+                  aria-label="Use Fixed Flat Fee calculation mode"
+                  aria-pressed={costType === 'fixed'}
                   onClick={() => setCostType('fixed')}
                   className={`py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
                     costType === 'fixed'
@@ -981,6 +1009,8 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                 </button>
                 <button
                   type="button"
+                  aria-label="Use Per Confirmed Guest calculation mode"
+                  aria-pressed={costType === 'per-guest'}
                   onClick={() => setCostType('per-guest')}
                   className={`py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
                     costType === 'per-guest'
@@ -1008,6 +1038,8 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                   type="number"
                   min={0}
                   value={unitEstimated}
+                  aria-label="Estimated unit cost in dollars"
+                  aria-describedby="budget-form-help"
                   onChange={(e) => setUnitEstimated(e.target.value)}
                   placeholder={costType === 'per-guest' ? '45' : '1500'}
                   className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -1028,6 +1060,8 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                   type="number"
                   min={0}
                   value={unitActual}
+                  aria-label="Actual unit cost in dollars"
+                  aria-describedby="budget-form-help"
                   onChange={(e) => setUnitActual(e.target.value)}
                   placeholder={costType === 'per-guest' ? '45' : '1500'}
                   className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -1049,6 +1083,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
 
             <button
               type="submit"
+              aria-label="Add expense line item to event budget"
               className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
             >
               <Plus className="w-4 h-4" />

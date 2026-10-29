@@ -111,7 +111,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 ? 'Log In to Atelier Account'
                 : 'Create Atelier Planner Account'}
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p id="auth-modal-desc" className="text-xs text-slate-500 mt-0.5">
               Access your personal and co-planned celebration workspaces
             </p>
           </div>
@@ -126,9 +126,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </div>
 
         {/* Mode Switcher */}
-        <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-lg">
+        <div
+          role="group"
+          aria-label="Authentication mode"
+          className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-lg"
+        >
           <button
             type="button"
+            aria-label="Switch to Log In mode"
+            aria-pressed={mode === 'login'}
             onClick={() => {
               setMode('login');
               setError(null);
@@ -143,6 +149,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
           <button
             type="button"
+            aria-label="Switch to Sign Up mode"
+            aria-pressed={mode === 'signup'}
             onClick={() => {
               setMode('signup');
               setError(null);
@@ -159,6 +167,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {error && (
           <div
+            id="auth-modal-error"
             role="alert"
             className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium"
           >
@@ -166,7 +175,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
         )}
 
-        <form onSubmit={handleFormSubmit} className="space-y-3.5" noValidate>
+        <form
+          onSubmit={handleFormSubmit}
+          aria-describedby="auth-modal-desc"
+          className="space-y-3.5"
+          noValidate
+        >
           {mode === 'signup' && (
             <div>
               <label
@@ -179,6 +193,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 id="auth-fullname"
                 type="text"
                 value={displayName}
+                aria-label="Full name"
+                aria-describedby="auth-modal-desc"
                 onChange={(e) => setDisplayName(e.target.value)}
                 placeholder="e.g., Elena Rostova"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -197,6 +213,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               id="auth-email"
               type="email"
               value={email}
+              aria-label="Email address"
+              aria-describedby="auth-modal-desc"
               onChange={(e) => setEmail(e.target.value)}
               placeholder="planner@atelier-events.io"
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -214,6 +232,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               id="auth-password"
               type="password"
               value={password}
+              aria-label="Account password"
+              aria-describedby="auth-modal-desc"
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Minimum 6 characters"
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -222,6 +242,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           <button
             type="submit"
+            aria-label={
+              mode === 'login'
+                ? 'Log in to workspace'
+                : 'Create account and sign in'
+            }
             className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer"
           >
             {mode === 'login' ? (
@@ -248,6 +273,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         <button
           type="button"
+          aria-label="Sign in with Google via Firebase Auth"
           onClick={handleGoogleSignIn}
           disabled={isLoadingGoogle}
           className="w-full py-2 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg transition-colors inline-flex items-center justify-center gap-2 cursor-pointer"

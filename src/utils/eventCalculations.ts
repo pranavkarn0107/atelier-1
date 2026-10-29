@@ -54,6 +54,9 @@ export interface BudgetMetrics {
   fixedActualTotal: number;
   variablePerGuestActualTotal: number;
   variablePerGuestRateSum: number;
+  contingencyRatePercent: number;
+  contingencyReserveAmount: number;
+  totalCommittedWithContingency: number;
   isOverBudget: boolean;
   categories: CategoryBudgetSummary[];
 }
@@ -79,6 +82,8 @@ export interface ComputedScheduleBlock extends ScheduleItem {
   startMinutes: number;
   endMinutes: number;
   durationMinutes: number;
+  bufferBeforeMinutes: number | null;
+  hasTightBuffer: boolean;
   hasConflict: boolean;
   conflictingWithTitles: string[];
 }
@@ -87,8 +92,18 @@ export interface TimelineMetrics {
   blocks: ComputedScheduleBlock[];
   totalDurationMinutes: number;
   conflictCount: number;
+  tightBufferCount: number;
+  recommendedBufferMinutes: number;
   readyOrCompletedCount: number;
   readinessPercent: number;
+}
+
+export interface VendorVerificationCheckpoint {
+  id: string;
+  label: string;
+  category: BudgetCategory;
+  verified: boolean;
+  statusNote: string;
 }
 
 export interface ReadinessSummary {
@@ -271,6 +286,21 @@ export function calculateBudgetMetrics(
     };
   }).filter((c) => c.estimated > 0 || c.actual > 0);
 
+  const hasCategoryOverrun = categories.some(
+    (c) => c.isExceedingProjectedBy10Pct
+  );
+  // Dynamic 5%–10% contingency margin based on event scale and category variance
+  const contingencyRatePercent =
+    hasCategoryOverrun || safeHeadcount >= 80
+      ? 10
+      : safeHeadcount >= 40
+      ? 7.5
+      : 5;
+  const contingencyReserveAmount =
+    Math.round(totalActual * (contingencyRatePercent / 100) * 100) / 100;
+  const totalCommittedWithContingency =
+    Math.round((totalActual + contingencyReserveAmount) * 100) / 100;
+
   return {
     targetBudget: safeTarget,
     confirmedHeadcount: safeHeadcount,
@@ -286,6 +316,9 @@ export function calculateBudgetMetrics(
     fixedActualTotal,
     variablePerGuestActualTotal,
     variablePerGuestRateSum,
+    contingencyRatePercent,
+    contingencyReserveAmount,
+    totalCommittedWithContingency,
     isOverBudget: totalActual > safeTarget,
     categories,
   };
@@ -344,6 +377,8 @@ export function parseTimeToMinutes(timeStr: string): number {
   return hours * 60 + minutes;
 }
 
+const RECOMMENDED_STAGE_BUFFER_MINUTES = 15;
+
 export function calculateTimelineMetrics(
   schedule: ScheduleItem[]
 ): TimelineMetrics {
@@ -363,6 +398,8 @@ export function calculateTimelineMetrics(
       startMinutes,
       endMinutes,
       durationMinutes,
+      bufferBeforeMinutes: null,
+      hasTightBuffer: false,
       hasConflict: false,
       conflictingWithTitles: [],
     };
@@ -370,6 +407,15 @@ export function calculateTimelineMetrics(
 
   let conflictCount = 0;
   for (let i = 0; i < blocks.length; i++) {
+    if (i > 0) {
+      const prev = blocks[i - 1];
+      const curr = blocks[i];
+      const gap = curr.startMinutes - prev.endMinutes;
+      curr.bufferBeforeMinutes = gap;
+      if (gap >= 0 && gap < RECOMMENDED_STAGE_BUFFER_MINUTES) {
+        curr.hasTightBuffer = true;
+      }
+    }
     for (let j = i + 1; j < blocks.length; j++) {
       const a = blocks[i];
       const b = blocks[j];
@@ -387,6 +433,7 @@ export function calculateTimelineMetrics(
     }
   }
 
+  const tightBufferCount = blocks.filter((b) => b.hasTightBuffer).length;
   const totalDurationMinutes = blocks.reduce(
     (acc, b) => acc + b.durationMinutes,
     0
@@ -403,9 +450,70 @@ export function calculateTimelineMetrics(
     blocks,
     totalDurationMinutes,
     conflictCount,
+    tightBufferCount,
+    recommendedBufferMinutes: RECOMMENDED_STAGE_BUFFER_MINUTES,
     readyOrCompletedCount,
     readinessPercent,
   };
+}
+
+export function evaluateVendorCheckpoints(
+  tasks: EventTask[],
+  budgetItems: BudgetItem[]
+): VendorVerificationCheckpoint[] {
+  const hasVenueDeposit = budgetItems.some(
+    (b) =>
+      b.category === 'Venue & Rentals' &&
+      (b.paymentStatus === 'deposit-paid' || b.paymentStatus === 'paid')
+  );
+  const hasCateringDeposit = budgetItems.some(
+    (b) =>
+      b.category === 'Catering & Beverage' &&
+      (b.paymentStatus === 'deposit-paid' || b.paymentStatus === 'paid')
+  );
+  const hasCompletedPreEventTask = tasks.some(
+    (t) => t.phase === 'Pre-Event' && t.status === 'completed'
+  );
+  const hasCompletedVenueCateringTask = tasks.some(
+    (t) => t.phase === 'Venue & Catering' && t.status === 'completed'
+  );
+  const hasEntertainmentBooked = budgetItems.some(
+    (b) =>
+      b.category === 'Entertainment & AV' &&
+      (b.paymentStatus === 'deposit-paid' || b.paymentStatus === 'paid')
+  );
+
+  return [
+    {
+      id: 'chk-venue-coi',
+      label: 'Venue Liability COI & Municipal Permit Checkpoint',
+      category: 'Venue & Rentals',
+      verified: hasVenueDeposit && hasCompletedPreEventTask,
+      statusNote:
+        hasVenueDeposit && hasCompletedPreEventTask
+          ? 'COI & venue contract deposit verified'
+          : 'Awaiting signed COI or Pre-Event permit milestone',
+    },
+    {
+      id: 'chk-catering-health',
+      label: 'Catering Health Permit & Allergen Kitchen Line',
+      category: 'Catering & Beverage',
+      verified: hasCateringDeposit || hasCompletedVenueCateringTask,
+      statusNote:
+        hasCateringDeposit || hasCompletedVenueCateringTask
+          ? 'Dietary manifest & kitchen retainer verified'
+          : 'Confirm catering deposit & dietary separation protocol',
+    },
+    {
+      id: 'chk-av-acoustic',
+      label: 'AV Rigging & Decibel Limit Compliance Checkpoint',
+      category: 'Entertainment & AV',
+      verified: hasEntertainmentBooked,
+      statusNote: hasEntertainmentBooked
+        ? 'AV/Ensemble contract & technical rider verified'
+        : 'Pending AV/Entertainment deposit & soundcheck sign-off',
+    },
+  ];
 }
 
 export function computeEventReadiness(

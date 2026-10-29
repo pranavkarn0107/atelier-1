@@ -450,7 +450,7 @@ export const IntelligenceTab: React.FC<IntelligenceTabProps> = ({
               </h2>
             </div>
           </div>
-          <p className="text-xs text-slate-500">
+          <p id="search-agent-help" className="text-xs text-slate-500">
             Grounded with real-time Google Search results to discuss current events, cite recent news, or fact-check claims.
           </p>
 
@@ -561,21 +561,34 @@ export const IntelligenceTab: React.FC<IntelligenceTabProps> = ({
         </div>
 
         {/* Search Input Form */}
-        <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
+        <form
+          onSubmit={handleSearchSubmit}
+          aria-describedby="search-agent-help"
+          className="flex items-center gap-2"
+        >
           <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <label htmlFor="search-agent-query-input" className="sr-only">
+              Ask the Google Search grounded agent
+            </label>
+            <Search
+              className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+              aria-hidden="true"
+            />
             <input
+              id="search-agent-query-input"
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Ask about current events, news, or fact-check..."
               aria-label="Ask the Google Search grounded agent"
+              aria-describedby="search-agent-help"
               className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
             />
           </div>
           <button
             type="submit"
             disabled={isSearching}
+            aria-label="Submit inquiry to Google Search grounded agent"
             className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Send className="w-3.5 h-3.5" />

@@ -9,7 +9,8 @@
     "start": "node --import tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "tsx --test src/planner.test.ts src/utils/eventCalculations.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

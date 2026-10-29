@@ -88,18 +88,36 @@ async function testConnection() {
 void testConnection();
 
 export async function signInWithGooglePopup() {
-  return signInWithPopup(auth, googleProvider);
+  try {
+    return await signInWithPopup(auth, googleProvider);
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Unable to complete Google sign-in in this browser context.';
+    throw new Error(message);
+  }
 }
 
-export async function signOutFirebase() {
-  return firebaseSignOut(auth);
+export async function signOutFirebase(): Promise<void> {
+  try {
+    await firebaseSignOut(auth);
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Unable to sign out of Firebase session.';
+    throw new Error(message);
+  }
 }
 
 /**
  * Persists an Event document to Firestore when a verified Firebase Auth user is active,
  * strictly enforcing the volumetric and schema constraints in firebase-blueprint.json.
  */
-export async function syncEventToFirestore(event: CelebrationEvent) {
+export async function syncEventToFirestore(
+  event: CelebrationEvent
+): Promise<void> {
   if (!auth.currentUser || !auth.currentUser.emailVerified) {
     return;
   }
@@ -111,8 +129,14 @@ export async function syncEventToFirestore(event: CelebrationEvent) {
     date: event.date.slice(0, 10),
     venueName: event.venueName.slice(0, 120),
     city: event.city.slice(0, 80),
-    targetBudget: Math.min(100000000, Math.max(0, Number(event.targetBudget) || 0)),
-    expectedGuests: Math.min(100000, Math.max(1, Number(event.expectedGuests) || 1)),
+    targetBudget: Math.min(
+      100000000,
+      Math.max(0, Number(event.targetBudget) || 0)
+    ),
+    expectedGuests: Math.min(
+      100000,
+      Math.max(1, Number(event.expectedGuests) || 1)
+    ),
     leadPlanner: event.leadPlanner.slice(0, 80),
     ownerId: auth.currentUser.uid,
     ownerEmail: (auth.currentUser.email || event.ownerEmail).slice(0, 160),
@@ -130,7 +154,9 @@ export async function syncEventToFirestore(event: CelebrationEvent) {
   }
 }
 
-export async function syncTemplateToFirestore(template: EventTemplate) {
+export async function syncTemplateToFirestore(
+  template: EventTemplate
+): Promise<void> {
   if (!auth.currentUser || !auth.currentUser.emailVerified) {
     return;
   }
@@ -141,8 +167,14 @@ export async function syncTemplateToFirestore(template: EventTemplate) {
     description: template.description.slice(0, 400),
     category: template.category.slice(0, 80),
     visibility: template.visibility,
-    targetBudget: Math.min(100000000, Math.max(0, Number(template.targetBudget) || 0)),
-    expectedGuests: Math.min(100000, Math.max(1, Number(template.expectedGuests) || 1)),
+    targetBudget: Math.min(
+      100000000,
+      Math.max(0, Number(template.targetBudget) || 0)
+    ),
+    expectedGuests: Math.min(
+      100000,
+      Math.max(1, Number(template.expectedGuests) || 1)
+    ),
     authorId: auth.currentUser.uid,
     authorName: template.authorName.slice(0, 80),
     createdAt: serverTimestamp(),

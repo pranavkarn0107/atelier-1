@@ -160,9 +160,15 @@ export const NewEventModal: React.FC<NewEventModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 pt-4" noValidate>
+        <form
+          onSubmit={handleSubmit}
+          aria-labelledby="new-event-modal-title"
+          className="space-y-4 pt-4"
+          noValidate
+        >
           {error && (
             <div
+              id="new-event-modal-error"
               role="alert"
               className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium"
             >
@@ -181,6 +187,8 @@ export const NewEventModal: React.FC<NewEventModalProps> = ({
               id="modal-event-name"
               type="text"
               value={name}
+              aria-label="Celebration or event title"
+              aria-describedby="new-event-modal-title"
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g., Horizon Architecture Awards Banquet"
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -199,6 +207,8 @@ export const NewEventModal: React.FC<NewEventModalProps> = ({
                 id="modal-event-category"
                 type="text"
                 value={category}
+                aria-label="Event classification"
+                aria-describedby="new-event-modal-title"
                 onChange={(e) => setCategory(e.target.value)}
                 className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
@@ -215,6 +225,8 @@ export const NewEventModal: React.FC<NewEventModalProps> = ({
                 id="modal-event-date"
                 type="date"
                 value={date}
+                aria-label="Event date"
+                aria-describedby="new-event-modal-title"
                 onChange={(e) => setDate(e.target.value)}
                 className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
@@ -233,6 +245,8 @@ export const NewEventModal: React.FC<NewEventModalProps> = ({
                 id="modal-event-venue"
                 type="text"
                 value={venueName}
+                aria-label="Venue name"
+                aria-describedby="new-event-modal-title"
                 onChange={(e) => setVenueName(e.target.value)}
                 placeholder="e.g., The Met Cloisters Courtyard"
                 className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -250,6 +264,8 @@ export const NewEventModal: React.FC<NewEventModalProps> = ({
                 id="modal-event-city"
                 type="text"
                 value={city}
+                aria-label="City and state"
+                aria-describedby="new-event-modal-title"
                 onChange={(e) => setCity(e.target.value)}
                 className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
@@ -269,6 +285,8 @@ export const NewEventModal: React.FC<NewEventModalProps> = ({
                 type="number"
                 min={1000}
                 value={targetBudget}
+                aria-label="Target budget in dollars"
+                aria-describedby="new-event-modal-title"
                 onChange={(e) => setTargetBudget(e.target.value)}
                 className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
@@ -286,6 +304,8 @@ export const NewEventModal: React.FC<NewEventModalProps> = ({
                 type="number"
                 min={5}
                 value={expectedGuests}
+                aria-label="Expected number of guests"
+                aria-describedby="new-event-modal-title"
                 onChange={(e) => setExpectedGuests(e.target.value)}
                 className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
@@ -302,6 +322,8 @@ export const NewEventModal: React.FC<NewEventModalProps> = ({
                 id="modal-event-planner"
                 type="text"
                 value={leadPlanner}
+                aria-label="Lead architect name"
+                aria-describedby="new-event-modal-title"
                 onChange={(e) => setLeadPlanner(e.target.value)}
                 className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
@@ -311,6 +333,7 @@ export const NewEventModal: React.FC<NewEventModalProps> = ({
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
             <button
               type="button"
+              aria-label="Cancel creating new event"
               onClick={onClose}
               className="px-4 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-lg cursor-pointer"
             >
@@ -318,6 +341,7 @@ export const NewEventModal: React.FC<NewEventModalProps> = ({
             </button>
             <button
               type="submit"
+              aria-label="Create event workspace"
               className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
             >
               Create Event Workspace
