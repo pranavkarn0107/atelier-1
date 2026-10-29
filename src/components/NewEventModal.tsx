@@ -9,12 +9,15 @@ interface NewEventModalProps {
   onCreateEvent: (newEvent: CelebrationEvent) => void;
 }
 
+/**
+ * Modal dialog for creating and initializing a new celebration or event workspace.
+ */
 export const NewEventModal: React.FC<NewEventModalProps> = ({
   isOpen,
   currentUser,
   onClose,
   onCreateEvent,
-}) => {
+}): React.ReactElement | null => {
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Corporate Gala & Keynote');
   const [date, setDate] = useState('2026-12-18');

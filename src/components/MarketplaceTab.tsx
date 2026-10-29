@@ -28,6 +28,9 @@ interface MarketplaceTabProps {
   onCreateCustomTheme: (theme: DashboardTheme) => void;
 }
 
+/**
+ * Renders the public/private event template marketplace and the custom UI theme studio.
+ */
 export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
   currentEvent,
   currentUser,
@@ -39,7 +42,7 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
   onApplyTemplateToCurrent,
   onSelectTheme,
   onCreateCustomTheme,
-}) => {
+}): React.ReactElement => {
   const [visibilityFilter, setVisibilityFilter] = useState<
     'all' | 'public' | 'private'
   >('all');
@@ -62,7 +65,7 @@ export const MarketplaceTab: React.FC<MarketplaceTabProps> = ({
     'Custom planner workspace theme'
   );
   const [canvasBg, setCanvasBg] = useState('#F4F6F9');
-  const [surfaceBg, setSurfaceBg] = useState('#FFFFFF');
+  const [surfaceBg] = useState('#FFFFFF');
   const [primaryAccent, setPrimaryAccent] = useState('#1E293B');
   const [heroBg, setHeroBg] = useState('#0F172A');
   const [themeNotice, setThemeNotice] = useState<string | null>(null);

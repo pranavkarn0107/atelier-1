@@ -4,6 +4,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signOut as firebaseSignOut,
+  UserCredential,
 } from 'firebase/auth';
 import {
   doc,
@@ -13,6 +14,11 @@ import {
   setDoc,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+import {
+  BUDGET_TIERS,
+  GUEST_LIMITS,
+  VALIDATION_LIMITS,
+} from './constants';
 import { CelebrationEvent, EventTemplate } from './types/event';
 
 const app = initializeApp(firebaseConfig);
@@ -46,6 +52,9 @@ export interface FirestoreErrorInfo {
   };
 }
 
+/**
+ * Formats and throws a structured JSON error payload when a Firestore security rule or operation fails.
+ */
 export function handleFirestoreError(
   error: unknown,
   operationType: OperationType,
@@ -72,7 +81,7 @@ export function handleFirestoreError(
   throw new Error(JSON.stringify(errInfo));
 }
 
-async function testConnection() {
+async function testConnection(): Promise<void> {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
@@ -85,9 +94,14 @@ async function testConnection() {
   }
 }
 
-void testConnection();
+void testConnection().catch((): void => {
+  // Handled inside testConnection
+});
 
-export async function signInWithGooglePopup() {
+/**
+ * Authenticates the user with Google OAuth via a Firebase popup window.
+ */
+export async function signInWithGooglePopup(): Promise<UserCredential> {
   try {
     return await signInWithPopup(auth, googleProvider);
   } catch (error: unknown) {
@@ -99,6 +113,9 @@ export async function signInWithGooglePopup() {
   }
 }
 
+/**
+ * Signs out the active Firebase Authentication user session.
+ */
 export async function signOutFirebase(): Promise<void> {
   try {
     await firebaseSignOut(auth);
@@ -121,28 +138,41 @@ export async function syncEventToFirestore(
   if (!auth.currentUser || !auth.currentUser.emailVerified) {
     return;
   }
-  const safeId = event.id.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 128);
+  const safeId = event.id
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .slice(0, VALIDATION_LIMITS.MAX_FIRESTORE_ID_LENGTH);
   const path = `events/${safeId}`;
   const payload = {
-    name: event.name.slice(0, 120),
-    category: event.category.slice(0, 80),
+    name: event.name.slice(0, VALIDATION_LIMITS.MAX_TITLE_LENGTH),
+    category: event.category.slice(0, VALIDATION_LIMITS.MAX_CATEGORY_LENGTH),
     date: event.date.slice(0, 10),
-    venueName: event.venueName.slice(0, 120),
-    city: event.city.slice(0, 80),
+    venueName: event.venueName.slice(0, VALIDATION_LIMITS.MAX_VENUE_LENGTH),
+    city: event.city.slice(0, VALIDATION_LIMITS.MAX_CATEGORY_LENGTH),
     targetBudget: Math.min(
-      100000000,
-      Math.max(0, Number(event.targetBudget) || 0)
+      BUDGET_TIERS.MAX_EVENT_BUDGET,
+      Math.max(BUDGET_TIERS.MIN_BUDGET, Number(event.targetBudget) || 0)
     ),
     expectedGuests: Math.min(
-      100000,
-      Math.max(1, Number(event.expectedGuests) || 1)
+      GUEST_LIMITS.MAX_EXPECTED_GUESTS,
+      Math.max(
+        GUEST_LIMITS.MIN_EXPECTED_GUESTS,
+        Number(event.expectedGuests) || GUEST_LIMITS.MIN_EXPECTED_GUESTS
+      )
     ),
-    leadPlanner: event.leadPlanner.slice(0, 80),
+    leadPlanner: event.leadPlanner.slice(
+      0,
+      VALIDATION_LIMITS.MAX_ASSIGNEE_LENGTH
+    ),
     ownerId: auth.currentUser.uid,
-    ownerEmail: (auth.currentUser.email || event.ownerEmail).slice(0, 160),
+    ownerEmail: (auth.currentUser.email || event.ownerEmail).slice(
+      0,
+      VALIDATION_LIMITS.MAX_EMAIL_LENGTH
+    ),
     collaboratorEmails: (event.collaboratorEmails || [])
-      .slice(0, 10)
-      .map((e) => e.trim().toLowerCase().slice(0, 160)),
+      .slice(0, GUEST_LIMITS.MAX_COLLABORATORS)
+      .map((e): string =>
+        e.trim().toLowerCase().slice(0, VALIDATION_LIMITS.MAX_EMAIL_LENGTH)
+      ),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -154,29 +184,43 @@ export async function syncEventToFirestore(
   }
 }
 
+/**
+ * Persists a reusable EventTemplate blueprint to Firestore when a verified Firebase Auth user is active.
+ */
 export async function syncTemplateToFirestore(
   template: EventTemplate
 ): Promise<void> {
   if (!auth.currentUser || !auth.currentUser.emailVerified) {
     return;
   }
-  const safeId = template.id.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 128);
+  const safeId = template.id
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .slice(0, VALIDATION_LIMITS.MAX_FIRESTORE_ID_LENGTH);
   const path = `templates/${safeId}`;
   const payload = {
-    title: template.title.slice(0, 120),
-    description: template.description.slice(0, 400),
-    category: template.category.slice(0, 80),
+    title: template.title.slice(0, VALIDATION_LIMITS.MAX_TITLE_LENGTH),
+    description: template.description.slice(
+      0,
+      VALIDATION_LIMITS.MAX_DESCRIPTION_LENGTH
+    ),
+    category: template.category.slice(0, VALIDATION_LIMITS.MAX_CATEGORY_LENGTH),
     visibility: template.visibility,
     targetBudget: Math.min(
-      100000000,
-      Math.max(0, Number(template.targetBudget) || 0)
+      BUDGET_TIERS.MAX_EVENT_BUDGET,
+      Math.max(BUDGET_TIERS.MIN_BUDGET, Number(template.targetBudget) || 0)
     ),
     expectedGuests: Math.min(
-      100000,
-      Math.max(1, Number(template.expectedGuests) || 1)
+      GUEST_LIMITS.MAX_EXPECTED_GUESTS,
+      Math.max(
+        GUEST_LIMITS.MIN_EXPECTED_GUESTS,
+        Number(template.expectedGuests) || GUEST_LIMITS.MIN_EXPECTED_GUESTS
+      )
     ),
     authorId: auth.currentUser.uid,
-    authorName: template.authorName.slice(0, 80),
+    authorName: template.authorName.slice(
+      0,
+      VALIDATION_LIMITS.MAX_ASSIGNEE_LENGTH
+    ),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };

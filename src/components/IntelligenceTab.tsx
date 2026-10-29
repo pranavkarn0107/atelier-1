@@ -109,11 +109,14 @@ function cleanFormattedText(raw: string): string {
   return raw.replace(/\*\*/g, '').replace(/★/g, '/ 5.0');
 }
 
+/**
+ * Renders the Gemini AI vendor/concept recommendation engine and the real-time Google Search grounded concierge.
+ */
 export const IntelligenceTab: React.FC<IntelligenceTabProps> = ({
   event,
   onAddBudgetItem,
   onAddTask,
-}) => {
+}): React.ReactElement => {
   const [recommendations, setRecommendations] = useState<VendorRecommendation[]>(
     () => buildInitialRecommendations(event)
   );

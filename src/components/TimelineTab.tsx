@@ -13,12 +13,15 @@ interface TimelineTabProps {
   onDeleteScheduleItem: (id: string) => void;
 }
 
+/**
+ * Renders the chronological run-of-show cue sheet with overlap conflict detection and 15-minute buffer warnings.
+ */
 export const TimelineTab: React.FC<TimelineTabProps> = ({
   timelineMetrics,
   onAddScheduleItem,
   onUpdateScheduleStatus,
   onDeleteScheduleItem,
-}) => {
+}): React.ReactElement => {
   const [startTime, setStartTime] = useState('22:30');
   const [endTime, setEndTime] = useState('23:15');
   const [title, setTitle] = useState('');

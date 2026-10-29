@@ -1,12 +1,29 @@
 import {
+  ALL_BUDGET_CATEGORIES,
+  ALL_DIETARY_RESTRICTIONS,
+  ALL_TASK_PHASES,
+  BUDGET_TIERS,
+  CATEGORY_COLORS,
+  CATEGORY_SHORT_LABELS,
+  GUEST_LIMITS,
+  NOTIFICATION_CONSTANTS,
+  READINESS_THRESHOLDS,
+  ReadinessStatus,
+  TIMELINE_CONSTANTS,
+  VALIDATION_LIMITS,
+} from '../constants';
+import {
   BudgetCategory,
   BudgetItem,
+  BudgetToastAction,
   CelebrationEvent,
   DietaryRestriction,
   EventTask,
   Guest,
   ScheduleItem,
   TaskPhase,
+  ToastNotification,
+  ToastVariant,
 } from '../types/event';
 
 export interface GuestMetrics {
@@ -112,29 +129,48 @@ export interface ReadinessSummary {
   daysUntilEvent: number;
 }
 
-const ALL_DIETARY: DietaryRestriction[] = [
-  'Standard',
-  'Vegetarian',
-  'Vegan',
-  'Gluten-Free',
-];
+/**
+ * Formats an ISO date string (YYYY-MM-DD) into a human-readable date label (e.g., "Nov 14, 2026"),
+ * returning a safe fallback label when the input is empty or malformed.
+ */
+export function formatEventDate(dateStr: string): string {
+  const trimmed = (dateStr || '').trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) {
+    return TIMELINE_CONSTANTS.FALLBACK_DATE_LABEL;
+  }
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, monthIndex, day));
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== monthIndex ||
+    parsed.getUTCDate() !== day
+  ) {
+    return TIMELINE_CONSTANTS.FALLBACK_DATE_LABEL;
+  }
+  const monthNames = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ] as const;
+  return `${monthNames[monthIndex]} ${day}, ${year}`;
+}
 
-const ALL_CATEGORIES: BudgetCategory[] = [
-  'Venue & Rentals',
-  'Catering & Beverage',
-  'Floral & Production',
-  'Entertainment & AV',
-  'Attire & Stationery',
-  'Logistics & Staffing',
-];
-
-const ALL_PHASES: TaskPhase[] = [
-  'Pre-Event',
-  'Venue & Catering',
-  'Guest Experience',
-  'Day-Of Execution',
-];
-
+/**
+ * Aggregates confirmed headcount, plus-ones, RSVP response rate, dietary counts, and table capacities.
+ */
 export function calculateGuestMetrics(guests: Guest[]): GuestMetrics {
   let confirmedGuestsOnly = 0;
   let confirmedPlusOnes = 0;
@@ -151,11 +187,15 @@ export function calculateGuestMetrics(guests: Guest[]): GuestMetrics {
   const tableCounts: Record<number, number> = {};
 
   for (const guest of guests) {
-    const partySize = 1 + Math.max(0, guest.plusOnes || 0);
+    const partySize =
+      1 + Math.max(GUEST_LIMITS.MIN_PLUS_ONES, guest.plusOnes || 0);
     if (guest.rsvpStatus === 'confirmed') {
       confirmedGuestsOnly += 1;
-      confirmedPlusOnes += Math.max(0, guest.plusOnes || 0);
-      const diet = ALL_DIETARY.includes(guest.dietary)
+      confirmedPlusOnes += Math.max(
+        GUEST_LIMITS.MIN_PLUS_ONES,
+        guest.plusOnes || 0
+      );
+      const diet = ALL_DIETARY_RESTRICTIONS.includes(guest.dietary)
         ? guest.dietary
         : 'Standard';
       dietaryBreakdown[diet] += partySize;
@@ -191,13 +231,16 @@ export function calculateGuestMetrics(guests: Guest[]): GuestMetrics {
   };
 }
 
+/**
+ * Computes fixed and per-guest budget line totals, >10% category overrun alerts, and dynamic 5–10% contingency margins.
+ */
 export function calculateBudgetMetrics(
   items: BudgetItem[],
   targetBudget: number,
   confirmedHeadcount: number
 ): BudgetMetrics {
-  const safeHeadcount = Math.max(0, confirmedHeadcount);
-  const safeTarget = Math.max(0, targetBudget);
+  const safeHeadcount = Math.max(BUDGET_TIERS.MIN_BUDGET, confirmedHeadcount);
+  const safeTarget = Math.max(BUDGET_TIERS.MIN_BUDGET, targetBudget);
 
   let totalEstimated = 0;
   let totalActual = 0;
@@ -206,46 +249,51 @@ export function calculateBudgetMetrics(
   let variablePerGuestActualTotal = 0;
   let variablePerGuestRateSum = 0;
 
-  const lines: ComputedBudgetLine[] = items.map((item) => {
-    const multiplier = item.costType === 'per-guest' ? safeHeadcount : 1;
-    const effectiveEstimated =
-      Math.round(item.unitEstimated * multiplier * 100) / 100;
-    const effectiveActual =
-      Math.round(item.unitActual * multiplier * 100) / 100;
-    const variance =
-      Math.round((effectiveEstimated - effectiveActual) * 100) / 100;
-    const overrunPercent =
-      effectiveEstimated > 0
-        ? Math.round(
-            ((effectiveActual - effectiveEstimated) / effectiveEstimated) * 1000
-          ) / 10
-        : 0;
-    const isExceedingProjectedBy10Pct =
-      effectiveEstimated > 0 && effectiveActual > effectiveEstimated * 1.1;
+  const lines: ComputedBudgetLine[] = items.map(
+    (item): ComputedBudgetLine => {
+      const multiplier = item.costType === 'per-guest' ? safeHeadcount : 1;
+      const effectiveEstimated =
+        Math.round(item.unitEstimated * multiplier * 100) / 100;
+      const effectiveActual =
+        Math.round(item.unitActual * multiplier * 100) / 100;
+      const variance =
+        Math.round((effectiveEstimated - effectiveActual) * 100) / 100;
+      const overrunPercent =
+        effectiveEstimated > 0
+          ? Math.round(
+              ((effectiveActual - effectiveEstimated) / effectiveEstimated) *
+                1000
+            ) / 10
+          : 0;
+      const isExceedingProjectedBy10Pct =
+        effectiveEstimated > 0 &&
+        effectiveActual >
+          effectiveEstimated * BUDGET_TIERS.OVERRUN_WARNING_MULTIPLIER;
 
-    totalEstimated += effectiveEstimated;
-    totalActual += effectiveActual;
-    totalPaid += item.paidAmount;
+      totalEstimated += effectiveEstimated;
+      totalActual += effectiveActual;
+      totalPaid += item.paidAmount;
 
-    if (item.costType === 'per-guest') {
-      variablePerGuestActualTotal += effectiveActual;
-      variablePerGuestRateSum += item.unitActual;
-    } else {
-      fixedActualTotal += effectiveActual;
+      if (item.costType === 'per-guest') {
+        variablePerGuestActualTotal += effectiveActual;
+        variablePerGuestRateSum += item.unitActual;
+      } else {
+        fixedActualTotal += effectiveActual;
+      }
+
+      return {
+        ...item,
+        effectiveEstimated,
+        effectiveActual,
+        variance,
+        overrunPercent,
+        isExceedingProjectedBy10Pct,
+      };
     }
-
-    return {
-      ...item,
-      effectiveEstimated,
-      effectiveActual,
-      variance,
-      overrunPercent,
-      isExceedingProjectedBy10Pct,
-    };
-  });
+  );
 
   const remainingBalanceToPay = Math.max(
-    0,
+    BUDGET_TIERS.MIN_BUDGET,
     Math.round((totalActual - totalPaid) * 100) / 100
   );
   const remainingBudget = Math.round((safeTarget - totalActual) * 100) / 100;
@@ -258,44 +306,52 @@ export function calculateBudgetMetrics(
       ? Math.round((totalActual / safeHeadcount) * 100) / 100
       : 0;
 
-  const categories: CategoryBudgetSummary[] = ALL_CATEGORIES.map((category) => {
-    const catLines = lines.filter((l) => l.category === category);
-    const estimated = catLines.reduce(
-      (acc, l) => acc + l.effectiveEstimated,
-      0
-    );
-    const actual = catLines.reduce((acc, l) => acc + l.effectiveActual, 0);
-    const paid = catLines.reduce((acc, l) => acc + l.paidAmount, 0);
-    const shareOfActualPercent =
-      totalActual > 0 ? Math.round((actual / totalActual) * 100) : 0;
-    const overrunPercent =
-      estimated > 0
-        ? Math.round(((actual - estimated) / estimated) * 1000) / 10
-        : 0;
-    const isExceedingProjectedBy10Pct =
-      estimated > 0 && actual > estimated * 1.1;
+  const categories: CategoryBudgetSummary[] = ALL_BUDGET_CATEGORIES.map(
+    (category): CategoryBudgetSummary => {
+      const catLines = lines.filter(
+        (l): boolean => l.category === category
+      );
+      const estimated = catLines.reduce(
+        (acc, l): number => acc + l.effectiveEstimated,
+        0
+      );
+      const actual = catLines.reduce(
+        (acc, l): number => acc + l.effectiveActual,
+        0
+      );
+      const paid = catLines.reduce((acc, l): number => acc + l.paidAmount, 0);
+      const shareOfActualPercent =
+        totalActual > 0 ? Math.round((actual / totalActual) * 100) : 0;
+      const overrunPercent =
+        estimated > 0
+          ? Math.round(((actual - estimated) / estimated) * 1000) / 10
+          : 0;
+      const isExceedingProjectedBy10Pct =
+        estimated > 0 &&
+        actual > estimated * BUDGET_TIERS.OVERRUN_WARNING_MULTIPLIER;
 
-    return {
-      category,
-      estimated,
-      actual,
-      paid,
-      shareOfActualPercent,
-      overrunPercent,
-      isExceedingProjectedBy10Pct,
-    };
-  }).filter((c) => c.estimated > 0 || c.actual > 0);
+      return {
+        category,
+        estimated,
+        actual,
+        paid,
+        shareOfActualPercent,
+        overrunPercent,
+        isExceedingProjectedBy10Pct,
+      };
+    }
+  ).filter((c): boolean => c.estimated > 0 || c.actual > 0);
 
   const hasCategoryOverrun = categories.some(
-    (c) => c.isExceedingProjectedBy10Pct
+    (c): boolean => c.isExceedingProjectedBy10Pct
   );
-  // Dynamic 5%–10% contingency margin based on event scale and category variance
   const contingencyRatePercent =
-    hasCategoryOverrun || safeHeadcount >= 80
-      ? 10
-      : safeHeadcount >= 40
-      ? 7.5
-      : 5;
+    hasCategoryOverrun ||
+    safeHeadcount >= BUDGET_TIERS.HIGH_CONTINGENCY_GUEST_THRESHOLD
+      ? BUDGET_TIERS.HIGH_CONTINGENCY_PERCENT
+      : safeHeadcount >= BUDGET_TIERS.MID_CONTINGENCY_GUEST_THRESHOLD
+      ? BUDGET_TIERS.MID_CONTINGENCY_PERCENT
+      : BUDGET_TIERS.LOW_CONTINGENCY_PERCENT;
   const contingencyReserveAmount =
     Math.round(totalActual * (contingencyRatePercent / 100) * 100) / 100;
   const totalCommittedWithContingency =
@@ -324,17 +380,22 @@ export function calculateBudgetMetrics(
   };
 }
 
+/**
+ * Calculates overall and phase-by-phase task completion metrics and sorts open priority tasks.
+ */
 export function calculateTaskMetrics(tasks: EventTask[]): TaskMetrics {
   const total = tasks.length;
-  const completed = tasks.filter((t) => t.status === 'completed').length;
-  const inProgress = tasks.filter((t) => t.status === 'in-progress').length;
-  const todo = tasks.filter((t) => t.status === 'todo').length;
+  const completed = tasks.filter((t): boolean => t.status === 'completed').length;
+  const inProgress = tasks.filter(
+    (t): boolean => t.status === 'in-progress'
+  ).length;
+  const todo = tasks.filter((t): boolean => t.status === 'todo').length;
   const completionPercent =
     total > 0 ? Math.round((completed / total) * 100) : 0;
 
   const urgentOpenTasks = tasks
-    .filter((t) => t.status !== 'completed')
-    .sort((a, b) => {
+    .filter((t): boolean => t.status !== 'completed')
+    .sort((a, b): number => {
       const priorityRank = { high: 0, medium: 1, low: 2 };
       if (priorityRank[a.priority] !== priorityRank[b.priority]) {
         return priorityRank[a.priority] - priorityRank[b.priority];
@@ -342,21 +403,23 @@ export function calculateTaskMetrics(tasks: EventTask[]): TaskMetrics {
       return a.dueDate.localeCompare(b.dueDate);
     });
 
-  const phases: PhaseTaskSummary[] = ALL_PHASES.map((phase) => {
-    const phaseTasks = tasks.filter((t) => t.phase === phase);
-    const phaseCompleted = phaseTasks.filter(
-      (t) => t.status === 'completed'
-    ).length;
-    return {
-      phase,
-      total: phaseTasks.length,
-      completed: phaseCompleted,
-      percent:
-        phaseTasks.length > 0
-          ? Math.round((phaseCompleted / phaseTasks.length) * 100)
-          : 0,
-    };
-  });
+  const phases: PhaseTaskSummary[] = ALL_TASK_PHASES.map(
+    (phase): PhaseTaskSummary => {
+      const phaseTasks = tasks.filter((t): boolean => t.phase === phase);
+      const phaseCompleted = phaseTasks.filter(
+        (t): boolean => t.status === 'completed'
+      ).length;
+      return {
+        phase,
+        total: phaseTasks.length,
+        completed: phaseCompleted,
+        percent:
+          phaseTasks.length > 0
+            ? Math.round((phaseCompleted / phaseTasks.length) * 100)
+            : 0,
+      };
+    }
+  );
 
   return {
     total,
@@ -369,41 +432,48 @@ export function calculateTaskMetrics(tasks: EventTask[]): TaskMetrics {
   };
 }
 
+/**
+ * Parses a 24-hour time string (HH:MM) into total minutes since midnight (00:00).
+ */
 export function parseTimeToMinutes(timeStr: string): number {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(timeStr.trim());
+  const match = /^(\d{1,2}):(\d{2})$/.exec((timeStr || '').trim());
   if (!match) return 0;
   const hours = Number(match[1]);
   const minutes = Number(match[2]);
-  return hours * 60 + minutes;
+  return hours * TIMELINE_CONSTANTS.MINUTES_PER_HOUR + minutes;
 }
 
-const RECOMMENDED_STAGE_BUFFER_MINUTES = 15;
-
+/**
+ * Sorts run-of-show schedule blocks chronologically, detects overlapping conflicts, and evaluates 15-minute transition buffers.
+ */
 export function calculateTimelineMetrics(
   schedule: ScheduleItem[]
 ): TimelineMetrics {
   const sorted = [...schedule].sort(
-    (a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime)
+    (a, b): number =>
+      parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime)
   );
 
-  const blocks: ComputedScheduleBlock[] = sorted.map((item) => {
-    const startMinutes = parseTimeToMinutes(item.startTime);
-    let endMinutes = parseTimeToMinutes(item.endTime);
-    if (endMinutes <= startMinutes) {
-      endMinutes += 24 * 60;
+  const blocks: ComputedScheduleBlock[] = sorted.map(
+    (item): ComputedScheduleBlock => {
+      const startMinutes = parseTimeToMinutes(item.startTime);
+      let endMinutes = parseTimeToMinutes(item.endTime);
+      if (endMinutes <= startMinutes) {
+        endMinutes += TIMELINE_CONSTANTS.MINUTES_PER_DAY;
+      }
+      const durationMinutes = Math.max(0, endMinutes - startMinutes);
+      return {
+        ...item,
+        startMinutes,
+        endMinutes,
+        durationMinutes,
+        bufferBeforeMinutes: null,
+        hasTightBuffer: false,
+        hasConflict: false,
+        conflictingWithTitles: [],
+      };
     }
-    const durationMinutes = Math.max(0, endMinutes - startMinutes);
-    return {
-      ...item,
-      startMinutes,
-      endMinutes,
-      durationMinutes,
-      bufferBeforeMinutes: null,
-      hasTightBuffer: false,
-      hasConflict: false,
-      conflictingWithTitles: [],
-    };
-  });
+  );
 
   let conflictCount = 0;
   for (let i = 0; i < blocks.length; i++) {
@@ -412,7 +482,10 @@ export function calculateTimelineMetrics(
       const curr = blocks[i];
       const gap = curr.startMinutes - prev.endMinutes;
       curr.bufferBeforeMinutes = gap;
-      if (gap >= 0 && gap < RECOMMENDED_STAGE_BUFFER_MINUTES) {
+      if (
+        gap >= 0 &&
+        gap < TIMELINE_CONSTANTS.RECOMMENDED_STAGE_BUFFER_MINUTES
+      ) {
         curr.hasTightBuffer = true;
       }
     }
@@ -433,13 +506,13 @@ export function calculateTimelineMetrics(
     }
   }
 
-  const tightBufferCount = blocks.filter((b) => b.hasTightBuffer).length;
+  const tightBufferCount = blocks.filter((b): boolean => b.hasTightBuffer).length;
   const totalDurationMinutes = blocks.reduce(
-    (acc, b) => acc + b.durationMinutes,
+    (acc, b): number => acc + b.durationMinutes,
     0
   );
   const readyOrCompletedCount = blocks.filter(
-    (b) => b.status === 'ready' || b.status === 'completed'
+    (b): boolean => b.status === 'ready' || b.status === 'completed'
   ).length;
   const readinessPercent =
     blocks.length > 0
@@ -451,34 +524,38 @@ export function calculateTimelineMetrics(
     totalDurationMinutes,
     conflictCount,
     tightBufferCount,
-    recommendedBufferMinutes: RECOMMENDED_STAGE_BUFFER_MINUTES,
+    recommendedBufferMinutes:
+      TIMELINE_CONSTANTS.RECOMMENDED_STAGE_BUFFER_MINUTES,
     readyOrCompletedCount,
     readinessPercent,
   };
 }
 
+/**
+ * Evaluates mandatory vendor verification checkpoints (COI insurance, permits, allergen lines, and acoustic compliance).
+ */
 export function evaluateVendorCheckpoints(
   tasks: EventTask[],
   budgetItems: BudgetItem[]
 ): VendorVerificationCheckpoint[] {
   const hasVenueDeposit = budgetItems.some(
-    (b) =>
+    (b): boolean =>
       b.category === 'Venue & Rentals' &&
       (b.paymentStatus === 'deposit-paid' || b.paymentStatus === 'paid')
   );
   const hasCateringDeposit = budgetItems.some(
-    (b) =>
+    (b): boolean =>
       b.category === 'Catering & Beverage' &&
       (b.paymentStatus === 'deposit-paid' || b.paymentStatus === 'paid')
   );
   const hasCompletedPreEventTask = tasks.some(
-    (t) => t.phase === 'Pre-Event' && t.status === 'completed'
+    (t): boolean => t.phase === 'Pre-Event' && t.status === 'completed'
   );
   const hasCompletedVenueCateringTask = tasks.some(
-    (t) => t.phase === 'Venue & Catering' && t.status === 'completed'
+    (t): boolean => t.phase === 'Venue & Catering' && t.status === 'completed'
   );
   const hasEntertainmentBooked = budgetItems.some(
-    (b) =>
+    (b): boolean =>
       b.category === 'Entertainment & AV' &&
       (b.paymentStatus === 'deposit-paid' || b.paymentStatus === 'paid')
   );
@@ -516,50 +593,62 @@ export function evaluateVendorCheckpoints(
   ];
 }
 
+/**
+ * Computes the composite event execution readiness score (0–100%), status classification, and countdown days.
+ */
 export function computeEventReadiness(
   taskMetrics: TaskMetrics,
   budgetMetrics: BudgetMetrics,
   guestMetrics: GuestMetrics,
   timelineMetrics: TimelineMetrics,
   eventDateStr: string,
-  referenceDateStr = '2026-10-23'
+  referenceDateStr: string = TIMELINE_CONSTANTS.DEFAULT_REFERENCE_DATE
 ): ReadinessSummary {
   const budgetHealth = budgetMetrics.isOverBudget
-    ? Math.max(0, 100 - (budgetMetrics.utilizationPercent - 100) * 2)
-    : 100;
+    ? Math.max(
+        0,
+        READINESS_THRESHOLDS.MAX_SCORE -
+          (budgetMetrics.utilizationPercent - READINESS_THRESHOLDS.MAX_SCORE) *
+            READINESS_THRESHOLDS.OVER_BUDGET_PENALTY_MULTIPLIER
+      )
+    : READINESS_THRESHOLDS.MAX_SCORE;
 
   const scheduleHealth =
     timelineMetrics.conflictCount === 0
       ? timelineMetrics.readinessPercent
       : Math.max(
-          20,
-          timelineMetrics.readinessPercent - timelineMetrics.conflictCount * 20
+          READINESS_THRESHOLDS.MIN_SCHEDULE_HEALTH,
+          timelineMetrics.readinessPercent -
+            timelineMetrics.conflictCount *
+              READINESS_THRESHOLDS.CONFLICT_PENALTY_POINTS
         );
 
   const overallScore = Math.round(
-    taskMetrics.completionPercent * 0.4 +
-      budgetHealth * 0.25 +
-      guestMetrics.rsvpResponseRate * 0.2 +
-      scheduleHealth * 0.15
+    taskMetrics.completionPercent * READINESS_THRESHOLDS.TASK_WEIGHT +
+      budgetHealth * READINESS_THRESHOLDS.BUDGET_WEIGHT +
+      guestMetrics.rsvpResponseRate * READINESS_THRESHOLDS.GUEST_WEIGHT +
+      scheduleHealth * READINESS_THRESHOLDS.SCHEDULE_WEIGHT
   );
 
-  let statusLabel: ReadinessSummary['statusLabel'] = 'On Track';
+  let statusLabel: ReadinessSummary['statusLabel'] = ReadinessStatus.ON_TRACK;
   if (
     budgetMetrics.isOverBudget ||
     timelineMetrics.conflictCount > 0 ||
-    overallScore < 55
+    overallScore < READINESS_THRESHOLDS.ACTION_REQUIRED_SCORE
   ) {
-    statusLabel = 'Action Required';
-  } else if (overallScore < 75) {
-    statusLabel = 'Needs Attention';
+    statusLabel = ReadinessStatus.ACTION_REQUIRED;
+  } else if (overallScore < READINESS_THRESHOLDS.NEEDS_ATTENTION_SCORE) {
+    statusLabel = ReadinessStatus.NEEDS_ATTENTION;
   }
 
   const eventMs = new Date(`${eventDateStr}T00:00:00Z`).getTime();
   const refMs = new Date(`${referenceDateStr}T00:00:00Z`).getTime();
-  const daysUntilEvent = Math.max(
-    0,
-    Math.round((eventMs - refMs) / (1000 * 60 * 60 * 24))
-  );
+  const daysUntilEvent = Number.isNaN(eventMs - refMs)
+    ? 0
+    : Math.max(
+        0,
+        Math.round((eventMs - refMs) / TIMELINE_CONSTANTS.MS_PER_DAY)
+      );
 
   return {
     overallScore,
@@ -568,21 +657,29 @@ export function computeEventReadiness(
   };
 }
 
-// Multi-User Access & Collaboration Logic
+/**
+ * Checks whether a user (by email or UID) is authorized to view an event plan.
+ */
 export function canUserAccessEvent(
-  event: Pick<CelebrationEvent, 'ownerId' | 'ownerEmail' | 'collaboratorEmails'>,
+  event: Pick<
+    CelebrationEvent,
+    'ownerId' | 'ownerEmail' | 'collaboratorEmails'
+  >,
   userEmail: string,
   userUid?: string
 ): boolean {
-  const normalizedEmail = userEmail.trim().toLowerCase();
+  const normalizedEmail = (userEmail || '').trim().toLowerCase();
   if (!normalizedEmail) return false;
   if (userUid && event.ownerId === userUid) return true;
   if (event.ownerEmail.trim().toLowerCase() === normalizedEmail) return true;
   return (event.collaboratorEmails || []).some(
-    (email) => email.trim().toLowerCase() === normalizedEmail
+    (email): boolean => email.trim().toLowerCase() === normalizedEmail
   );
 }
 
+/**
+ * Checks whether a user (by email or UID) has owner or co-planner edit privileges on an event plan.
+ */
 export function canUserEditEvent(
   event: Pick<
     CelebrationEvent,
@@ -591,19 +688,19 @@ export function canUserEditEvent(
   userEmail: string,
   userUid?: string
 ): boolean {
-  const normalizedEmail = userEmail.trim().toLowerCase();
+  const normalizedEmail = (userEmail || '').trim().toLowerCase();
   if (!normalizedEmail) return false;
   if (userUid && event.ownerId === userUid) return true;
   if (event.ownerEmail.trim().toLowerCase() === normalizedEmail) return true;
 
   const collabRecord = (event.collaborators || []).find(
-    (c) => c.email.trim().toLowerCase() === normalizedEmail
+    (c): boolean => c.email.trim().toLowerCase() === normalizedEmail
   );
   if (collabRecord) {
     return collabRecord.role === 'co-planner';
   }
   return (event.collaboratorEmails || []).some(
-    (email) => email.trim().toLowerCase() === normalizedEmail
+    (email): boolean => email.trim().toLowerCase() === normalizedEmail
   );
 }
 
@@ -612,62 +709,79 @@ export interface ValidationResult {
   error?: string;
 }
 
+/**
+ * Validates a collaborator invitation email against format, duplicate, owner, and capacity rules.
+ */
 export function validateCollaboratorInvite(
   inviteEmail: string,
   existingEmails: string[],
   ownerEmail: string
 ): ValidationResult {
-  const trimmed = inviteEmail.trim().toLowerCase();
+  const trimmed = (inviteEmail || '').trim().toLowerCase();
   if (
     !trimmed ||
-    trimmed.length < 3 ||
-    trimmed.length > 160 ||
+    trimmed.length < VALIDATION_LIMITS.MIN_EMAIL_LENGTH ||
+    trimmed.length > VALIDATION_LIMITS.MAX_EMAIL_LENGTH ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)
   ) {
     return { valid: false, error: 'Please enter a valid email address.' };
   }
-  if (trimmed === ownerEmail.trim().toLowerCase()) {
+  if (trimmed === (ownerEmail || '').trim().toLowerCase()) {
     return {
       valid: false,
       error: 'The event owner is already the primary architect of this event.',
     };
   }
-  if (existingEmails.some((e) => e.trim().toLowerCase() === trimmed)) {
+  if (
+    existingEmails.some((e): boolean => e.trim().toLowerCase() === trimmed)
+  ) {
     return {
       valid: false,
       error: 'This collaborator has already been invited to co-plan this event.',
     };
   }
-  if (existingEmails.length >= 10) {
+  if (existingEmails.length >= GUEST_LIMITS.MAX_COLLABORATORS) {
     return {
       valid: false,
-      error: 'Maximum of 10 collaborators reached for this event.',
+      error: `Maximum of ${GUEST_LIMITS.MAX_COLLABORATORS} collaborators reached for this event.`,
     };
   }
   return { valid: true };
 }
 
+/**
+ * Validates marketplace template title, description, and category lengths.
+ */
 export function validateTemplateInput(input: {
   title: string;
   description: string;
   category: string;
 }): ValidationResult {
-  const title = input.title.trim();
-  const desc = input.description.trim();
-  const cat = input.category.trim();
-  if (title.length < 2 || title.length > 120) {
+  const title = (input.title || '').trim();
+  const desc = (input.description || '').trim();
+  const cat = (input.category || '').trim();
+  if (
+    title.length < VALIDATION_LIMITS.MIN_TEXT_LENGTH ||
+    title.length > VALIDATION_LIMITS.MAX_TITLE_LENGTH
+  ) {
     return {
       valid: false,
       error: 'Template title must be between 2 and 120 characters.',
     };
   }
-  if (desc.length < 2 || desc.length > 400) {
+  if (
+    desc.length < VALIDATION_LIMITS.MIN_TEXT_LENGTH ||
+    desc.length > VALIDATION_LIMITS.MAX_DESCRIPTION_LENGTH
+  ) {
     return {
       valid: false,
       error: 'Template description must be between 2 and 400 characters.',
     };
   }
-  if (cat.length < 2 || cat.length > 80) {
+  if (
+    cat.length < VALIDATION_LIMITS.MIN_TEXT_LENGTH ||
+    cat.length > VALIDATION_LIMITS.MAX_CATEGORY_LENGTH
+  ) {
     return {
       valid: false,
       error: 'Category must be between 2 and 80 characters.',
@@ -676,6 +790,9 @@ export function validateTemplateInput(input: {
   return { valid: true };
 }
 
+/**
+ * Validates task checklist item input fields (title, YYYY-MM-DD due date, and assignee).
+ */
 export function validateTaskInput(input: {
   title: string;
   dueDate: string;
@@ -683,8 +800,8 @@ export function validateTaskInput(input: {
 }): ValidationResult {
   if (
     !input.title ||
-    input.title.trim().length < 2 ||
-    input.title.trim().length > 200
+    input.title.trim().length < VALIDATION_LIMITS.MIN_TEXT_LENGTH ||
+    input.title.trim().length > VALIDATION_LIMITS.MAX_TASK_TITLE_LENGTH
   ) {
     return {
       valid: false,
@@ -696,8 +813,8 @@ export function validateTaskInput(input: {
   }
   if (
     !input.assignee ||
-    input.assignee.trim().length < 2 ||
-    input.assignee.trim().length > 80
+    input.assignee.trim().length < VALIDATION_LIMITS.MIN_TEXT_LENGTH ||
+    input.assignee.trim().length > VALIDATION_LIMITS.MAX_ASSIGNEE_LENGTH
   ) {
     return {
       valid: false,
@@ -707,6 +824,9 @@ export function validateTaskInput(input: {
   return { valid: true };
 }
 
+/**
+ * Validates budget line item input fields (title, vendor, and non-negative numeric costs).
+ */
 export function validateBudgetInput(input: {
   title: string;
   vendor: string;
@@ -715,8 +835,8 @@ export function validateBudgetInput(input: {
 }): ValidationResult {
   if (
     !input.title ||
-    input.title.trim().length < 2 ||
-    input.title.trim().length > 160
+    input.title.trim().length < VALIDATION_LIMITS.MIN_TEXT_LENGTH ||
+    input.title.trim().length > VALIDATION_LIMITS.MAX_SCHEDULE_TITLE_LENGTH
   ) {
     return {
       valid: false,
@@ -725,8 +845,8 @@ export function validateBudgetInput(input: {
   }
   if (
     !input.vendor ||
-    input.vendor.trim().length < 2 ||
-    input.vendor.trim().length > 120
+    input.vendor.trim().length < VALIDATION_LIMITS.MIN_TEXT_LENGTH ||
+    input.vendor.trim().length > VALIDATION_LIMITS.MAX_VENUE_LENGTH
   ) {
     return {
       valid: false,
@@ -738,8 +858,8 @@ export function validateBudgetInput(input: {
   if (
     input.unitEstimated === '' ||
     Number.isNaN(est) ||
-    est < 0 ||
-    est > 10000000
+    est < BUDGET_TIERS.MIN_BUDGET ||
+    est > BUDGET_TIERS.MAX_LINE_ITEM_COST
   ) {
     return {
       valid: false,
@@ -749,8 +869,8 @@ export function validateBudgetInput(input: {
   if (
     input.unitActual === '' ||
     Number.isNaN(act) ||
-    act < 0 ||
-    act > 10000000
+    act < BUDGET_TIERS.MIN_BUDGET ||
+    act > BUDGET_TIERS.MAX_LINE_ITEM_COST
   ) {
     return {
       valid: false,
@@ -760,6 +880,9 @@ export function validateBudgetInput(input: {
   return { valid: true };
 }
 
+/**
+ * Validates guest RSVP entry fields (full name, email format, and plus-one count bounds).
+ */
 export function validateGuestInput(input: {
   fullName: string;
   email: string;
@@ -767,25 +890,32 @@ export function validateGuestInput(input: {
 }): ValidationResult {
   if (
     !input.fullName ||
-    input.fullName.trim().length < 2 ||
-    input.fullName.trim().length > 120
+    input.fullName.trim().length < VALIDATION_LIMITS.MIN_TEXT_LENGTH ||
+    input.fullName.trim().length > VALIDATION_LIMITS.MAX_TITLE_LENGTH
   ) {
     return { valid: false, error: 'Guest full name is required.' };
   }
   if (
     !input.email ||
-    input.email.trim().length > 160 ||
+    input.email.trim().length > VALIDATION_LIMITS.MAX_EMAIL_LENGTH ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim())
   ) {
     return { valid: false, error: 'A valid email address is required.' };
   }
   const plus = Number(input.plusOnes);
-  if (Number.isNaN(plus) || plus < 0 || plus > 10) {
+  if (
+    Number.isNaN(plus) ||
+    plus < GUEST_LIMITS.MIN_PLUS_ONES ||
+    plus > GUEST_LIMITS.MAX_PLUS_ONES
+  ) {
     return { valid: false, error: 'Plus-ones must be between 0 and 10.' };
   }
   return { valid: true };
 }
 
+/**
+ * Validates run-of-show schedule cue input fields (title, HH:MM start/end times, and location).
+ */
 export function validateScheduleInput(input: {
   title: string;
   startTime: string;
@@ -794,8 +924,8 @@ export function validateScheduleInput(input: {
 }): ValidationResult {
   if (
     !input.title ||
-    input.title.trim().length < 2 ||
-    input.title.trim().length > 160
+    input.title.trim().length < VALIDATION_LIMITS.MIN_TEXT_LENGTH ||
+    input.title.trim().length > VALIDATION_LIMITS.MAX_SCHEDULE_TITLE_LENGTH
   ) {
     return { valid: false, error: 'Schedule activity title is required.' };
   }
@@ -810,8 +940,8 @@ export function validateScheduleInput(input: {
   }
   if (
     !input.location ||
-    input.location.trim().length < 2 ||
-    input.location.trim().length > 120
+    input.location.trim().length < VALIDATION_LIMITS.MIN_TEXT_LENGTH ||
+    input.location.trim().length > VALIDATION_LIMITS.MAX_VENUE_LENGTH
   ) {
     return { valid: false, error: 'Location or room name is required.' };
   }
@@ -852,31 +982,19 @@ export interface BudgetChartBreakdown {
   exceedingCategories: CategoryChartDatum[];
 }
 
-const CATEGORY_COLORS: Record<BudgetCategory, string> = {
-  'Venue & Rentals': '#0F172A',
-  'Catering & Beverage': '#B45309',
-  'Floral & Production': '#047857',
-  'Entertainment & AV': '#1D4ED8',
-  'Attire & Stationery': '#4338CA',
-  'Logistics & Staffing': '#475569',
-};
-
-const CATEGORY_SHORT_LABELS: Record<BudgetCategory, string> = {
-  'Venue & Rentals': 'Venue',
-  'Catering & Beverage': 'Catering',
-  'Floral & Production': 'Floral',
-  'Entertainment & AV': 'Ent. & AV',
-  'Attire & Stationery': 'Stationery',
-  'Logistics & Staffing': 'Logistics',
-};
-
+/**
+ * Transforms computed budget metrics into Recharts-ready bar and pie chart data structures.
+ */
 export function buildBudgetChartData(
   metrics: BudgetMetrics
 ): BudgetChartBreakdown {
-  const projectedTotal = Math.max(0, metrics.totalEstimated);
-  const actualTotal = Math.max(0, metrics.totalActual);
-  const targetBudget = Math.max(0, metrics.targetBudget);
-  const paidTotal = Math.max(0, metrics.totalPaid);
+  const projectedTotal = Math.max(
+    BUDGET_TIERS.MIN_BUDGET,
+    metrics.totalEstimated
+  );
+  const actualTotal = Math.max(BUDGET_TIERS.MIN_BUDGET, metrics.totalActual);
+  const targetBudget = Math.max(BUDGET_TIERS.MIN_BUDGET, metrics.targetBudget);
+  const paidTotal = Math.max(BUDGET_TIERS.MIN_BUDGET, metrics.totalPaid);
 
   const actualVsProjectedPercent =
     projectedTotal > 0
@@ -892,29 +1010,31 @@ export function buildBudgetChartData(
   const deltaAmount = Math.round((actualTotal - projectedTotal) * 100) / 100;
   const isActualOverProjected = actualTotal > projectedTotal;
 
-  const categories: CategoryChartDatum[] = metrics.categories.map((cat) => {
-    const shareOfProjectedPercent =
-      projectedTotal > 0
-        ? Math.round((cat.estimated / projectedTotal) * 100)
-        : 0;
-    const variance = Math.round((cat.estimated - cat.actual) * 100) / 100;
-    return {
-      name: cat.category,
-      shortName: CATEGORY_SHORT_LABELS[cat.category] || cat.category,
-      projected: cat.estimated,
-      actual: cat.actual,
-      paid: cat.paid,
-      variance,
-      overrunPercent: cat.overrunPercent,
-      isExceedingProjectedBy10Pct: cat.isExceedingProjectedBy10Pct,
-      shareOfActualPercent: cat.shareOfActualPercent,
-      shareOfProjectedPercent,
-      color: CATEGORY_COLORS[cat.category] || '#334155',
-    };
-  });
+  const categories: CategoryChartDatum[] = metrics.categories.map(
+    (cat): CategoryChartDatum => {
+      const shareOfProjectedPercent =
+        projectedTotal > 0
+          ? Math.round((cat.estimated / projectedTotal) * 100)
+          : 0;
+      const variance = Math.round((cat.estimated - cat.actual) * 100) / 100;
+      return {
+        name: cat.category,
+        shortName: CATEGORY_SHORT_LABELS[cat.category] || cat.category,
+        projected: cat.estimated,
+        actual: cat.actual,
+        paid: cat.paid,
+        variance,
+        overrunPercent: cat.overrunPercent,
+        isExceedingProjectedBy10Pct: cat.isExceedingProjectedBy10Pct,
+        shareOfActualPercent: cat.shareOfActualPercent,
+        shareOfProjectedPercent,
+        color: CATEGORY_COLORS[cat.category] || '#334155',
+      };
+    }
+  );
 
   const exceedingCategories = categories.filter(
-    (c) => c.isExceedingProjectedBy10Pct
+    (c): boolean => c.isExceedingProjectedBy10Pct
   );
 
   return {
@@ -937,6 +1057,131 @@ export function buildBudgetChartData(
     ],
     categories,
     exceedingCategories,
+  };
+}
+
+/**
+ * Sanitizes user-supplied text by stripping HTML angle brackets, control characters,
+ * and clamping the string to the specified maximum length.
+ */
+export function sanitizeInputText(
+  raw: string,
+  maxLength: number = VALIDATION_LIMITS.MAX_DESCRIPTION_LENGTH
+): string {
+  const cleaned = (raw || '')
+    .replace(/[<>]/g, '')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.slice(0, Math.max(0, maxLength));
+}
+
+/**
+ * Determines whether a budget line item qualifies as a significant financial commitment
+ * (>= $1,000 effective cost or >= 5% of the event's target budget ceiling).
+ */
+export function isSignificantBudgetItem(
+  item: Pick<BudgetItem, 'costType' | 'unitEstimated' | 'unitActual'>,
+  confirmedHeadcount: number,
+  targetBudget: number
+): boolean {
+  const safeHeadcount = Math.max(BUDGET_TIERS.MIN_BUDGET, confirmedHeadcount);
+  const safeTarget = Math.max(BUDGET_TIERS.MIN_BUDGET, targetBudget);
+  const multiplier = item.costType === 'per-guest' ? safeHeadcount : 1;
+  const effectiveActual = Math.max(
+    BUDGET_TIERS.MIN_BUDGET,
+    item.unitActual * multiplier
+  );
+  const effectiveEstimated = Math.max(
+    BUDGET_TIERS.MIN_BUDGET,
+    item.unitEstimated * multiplier
+  );
+  const highestCommitment = Math.max(effectiveActual, effectiveEstimated);
+  const relativeThreshold =
+    safeTarget > 0
+      ? safeTarget * NOTIFICATION_CONSTANTS.SIGNIFICANT_BUDGET_SHARE_RATIO
+      : NOTIFICATION_CONSTANTS.SIGNIFICANT_BUDGET_THRESHOLD;
+
+  return (
+    highestCommitment >= NOTIFICATION_CONSTANTS.SIGNIFICANT_BUDGET_THRESHOLD ||
+    (safeTarget > 0 && highestCommitment >= relativeThreshold)
+  );
+}
+
+/**
+ * Builds a structured real-time toast notification payload when a budget item is created or updated,
+ * highlighting significant financial items, >10% variance alerts, and multi-tier data persistence confirmation.
+ */
+export function buildBudgetPersistenceToast(params: {
+  action: BudgetToastAction;
+  item: BudgetItem;
+  confirmedHeadcount: number;
+  targetBudget: number;
+  persistenceChannel?: string;
+  timestamp?: string;
+}): ToastNotification {
+  const safeHeadcount = Math.max(
+    BUDGET_TIERS.MIN_BUDGET,
+    params.confirmedHeadcount
+  );
+  const multiplier = params.item.costType === 'per-guest' ? safeHeadcount : 1;
+  const effectiveActual =
+    Math.round(params.item.unitActual * multiplier * 100) / 100;
+  const effectiveEstimated =
+    Math.round(params.item.unitEstimated * multiplier * 100) / 100;
+  const isSignificant = isSignificantBudgetItem(
+    params.item,
+    safeHeadcount,
+    params.targetBudget
+  );
+  const isExceedingBy10Pct =
+    effectiveEstimated > 0 &&
+    effectiveActual >
+      effectiveEstimated * BUDGET_TIERS.OVERRUN_WARNING_MULTIPLIER;
+
+  const formattedActual = `$${Math.round(effectiveActual).toLocaleString('en-US')}`;
+  const shareOfTarget =
+    params.targetBudget > 0
+      ? Math.round((effectiveActual / params.targetBudget) * 1000) / 10
+      : 0;
+
+  let variant: ToastVariant = isSignificant ? 'significant' : 'success';
+  if (isExceedingBy10Pct) {
+    variant = 'warning';
+  }
+
+  const actionVerb =
+    params.action === 'created'
+      ? 'Created'
+      : params.action === 'updated'
+      ? 'Updated'
+      : params.action === 'payment-updated'
+      ? 'Updated Payment Status'
+      : 'Updated Target Ceiling';
+
+  const title = isSignificant
+    ? `Significant Budget Item ${actionVerb} & Persisted`
+    : `Budget Line Item ${actionVerb} & Persisted`;
+
+  const overrunSuffix = isExceedingBy10Pct
+    ? ` · Exceeds projected baseline by >10% ($${Math.round(effectiveEstimated).toLocaleString('en-US')} est.)`
+    : '';
+
+  const message = `"${params.item.title}" (${params.item.vendor}) committed at ${formattedActual} (${shareOfTarget}% of target budget)${overrunSuffix}. Confirmed saved to ${params.persistenceChannel || NOTIFICATION_CONSTANTS.DEFAULT_PERSISTENCE_CHANNEL}.`;
+
+  return {
+    id: `toast-${params.action}-${params.item.id}-${Date.now()}`,
+    title,
+    message,
+    variant,
+    isSignificant,
+    effectiveAmount: effectiveActual,
+    category: params.item.category,
+    action: params.action,
+    persistedAt: params.timestamp || new Date().toISOString(),
+    persistenceChannel:
+      params.persistenceChannel ||
+      NOTIFICATION_CONSTANTS.DEFAULT_PERSISTENCE_CHANNEL,
   };
 }
 

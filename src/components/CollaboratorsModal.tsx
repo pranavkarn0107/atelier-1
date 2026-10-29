@@ -26,6 +26,9 @@ interface CollaboratorsModalProps {
   }) => void;
 }
 
+/**
+ * Modal dialog for managing co-planner email invitations, RBAC role permissions, and shared event metadata.
+ */
 export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
   isOpen,
   event,
@@ -35,7 +38,7 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
   onInviteCollaborator,
   onRemoveCollaborator,
   onUpdateEventDetails,
-}) => {
+}): React.ReactElement | null => {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<CollaboratorRole>('co-planner');
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -43,8 +46,8 @@ export const CollaboratorsModal: React.FC<CollaboratorsModalProps> = ({
 
   // Co-Planner Editable Event Details State
   const [name, setName] = useState(event.name);
-  const [category, setCategory] = useState(event.category);
-  const [date, setDate] = useState(event.date);
+  const [category] = useState(event.category);
+  const [date] = useState(event.date);
   const [venueName, setVenueName] = useState(event.venueName);
   const [city, setCity] = useState(event.city);
   const [targetBudget, setTargetBudget] = useState(String(event.targetBudget));

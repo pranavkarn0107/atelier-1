@@ -1,5 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { AlertCircle, Plus, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  Database,
+  Pencil,
+  Plus,
+  Save,
+  Sparkles,
+  Trash2,
+  X,
+} from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -12,27 +22,35 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { NOTIFICATION_CONSTANTS } from '../constants';
 import {
   BudgetCategory,
   BudgetItem,
   CostType,
   PaymentStatus,
+  ToastNotification,
 } from '../types/event';
 import {
   BudgetMetrics,
   buildBudgetChartData,
+  ComputedBudgetLine,
+  isSignificantBudgetItem,
+  sanitizeInputText,
   validateBudgetInput,
 } from '../utils/eventCalculations';
 
 interface BudgetTabProps {
   budgetMetrics: BudgetMetrics;
   onAddBudgetItem: (item: Omit<BudgetItem, 'id'>) => void;
+  onUpdateBudgetItem: (item: BudgetItem) => void;
   onUpdatePaymentStatus: (itemId: string, status: PaymentStatus) => void;
   onDeleteBudgetItem: (itemId: string) => void;
   onUpdateTargetBudget: (target: number) => void;
+  latestBudgetToast?: ToastNotification | null;
+  onDismissBudgetToast?: (id: string) => void;
 }
 
-const CATEGORIES: ('All' | BudgetCategory)[] = [
+const CATEGORIES: readonly ('All' | BudgetCategory)[] = [
   'All',
   'Venue & Rentals',
   'Catering & Beverage',
@@ -40,32 +58,41 @@ const CATEGORIES: ('All' | BudgetCategory)[] = [
   'Entertainment & AV',
   'Attire & Stationery',
   'Logistics & Staffing',
-];
+] as const;
 
+/**
+ * Renders the automated cost ledger, Recharts Projected vs. Actual visualizations,
+ * >10% category overrun warning banners, inline budget item editor, and real-time persistence alerts.
+ */
 export const BudgetTab: React.FC<BudgetTabProps> = ({
   budgetMetrics,
   onAddBudgetItem,
+  onUpdateBudgetItem,
   onUpdatePaymentStatus,
   onDeleteBudgetItem,
   onUpdateTargetBudget,
-}) => {
+  latestBudgetToast,
+  onDismissBudgetToast,
+}): React.ReactElement => {
   const [selectedCategory, setSelectedCategory] =
     useState<'All' | BudgetCategory>('All');
   const [pieMetricMode, setPieMetricMode] = useState<'actual' | 'projected'>(
     'actual'
   );
-  const [editingTarget, setEditingTarget] = useState(
+  const [editingTarget, setEditingTarget] = useState<string>(
     String(budgetMetrics.targetBudget)
   );
 
-  // New Budget Line Form State
-  const [title, setTitle] = useState('');
-  const [vendor, setVendor] = useState('');
-  const [category, setCategory] = useState<BudgetCategory>('Catering & Beverage');
+  // Create / Update Budget Line Form State
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [title, setTitle] = useState<string>('');
+  const [vendor, setVendor] = useState<string>('');
+  const [category, setCategory] =
+    useState<BudgetCategory>('Catering & Beverage');
   const [costType, setCostType] = useState<CostType>('fixed');
-  const [unitEstimated, setUnitEstimated] = useState('');
-  const [unitActual, setUnitActual] = useState('');
-  const [paidAmount, setPaidAmount] = useState('0');
+  const [unitEstimated, setUnitEstimated] = useState<string>('');
+  const [unitActual, setUnitActual] = useState<string>('');
+  const [paidAmount, setPaidAmount] = useState<string>('0');
   const [formError, setFormError] = useState<string | null>(null);
 
   const chartData = useMemo(
@@ -74,35 +101,65 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
   );
 
   const exceedingCategorySet = useMemo(
-    () => new Set(chartData.exceedingCategories.map((c) => c.name)),
+    () => new Set(chartData.exceedingCategories.map((c): BudgetCategory => c.name)),
     [chartData.exceedingCategories]
   );
 
-  const formatCurrency = (val: number) =>
+  const formatCurrency = (val: number): string =>
     new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
       maximumFractionDigits: 0,
     }).format(val);
 
-  const filteredLines = budgetMetrics.lines.filter((line) =>
-    selectedCategory === 'All' ? true : line.category === selectedCategory
+  const filteredLines = budgetMetrics.lines.filter(
+    (line: ComputedBudgetLine): boolean =>
+      selectedCategory === 'All' ? true : line.category === selectedCategory
   );
 
-  const handleTargetBlur = () => {
+  const handleTargetBlur = (): void => {
     const parsed = Number(editingTarget);
-    if (!Number.isNaN(parsed) && parsed >= 1000) {
+    if (
+      !Number.isNaN(parsed) &&
+      parsed >= NOTIFICATION_CONSTANTS.MIN_EDITABLE_TARGET_BUDGET
+    ) {
       onUpdateTargetBudget(parsed);
     } else {
       setEditingTarget(String(budgetMetrics.targetBudget));
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const resetFormState = (): void => {
+    setEditingItemId(null);
+    setTitle('');
+    setVendor('');
+    setCategory('Catering & Beverage');
+    setCostType('fixed');
+    setUnitEstimated('');
+    setUnitActual('');
+    setPaidAmount('0');
+    setFormError(null);
+  };
+
+  const handleStartEditLine = (line: ComputedBudgetLine): void => {
+    setEditingItemId(line.id);
+    setTitle(line.title);
+    setVendor(line.vendor);
+    setCategory(line.category);
+    setCostType(line.costType);
+    setUnitEstimated(String(line.unitEstimated));
+    setUnitActual(String(line.unitActual));
+    setPaidAmount(String(line.paidAmount));
+    setFormError(null);
+  };
+
+  const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
+    const cleanTitle = sanitizeInputText(title);
+    const cleanVendor = sanitizeInputText(vendor);
     const validation = validateBudgetInput({
-      title,
-      vendor,
+      title: cleanTitle,
+      vendor: cleanVendor,
       unitEstimated,
       unitActual,
     });
@@ -126,22 +183,32 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
       paymentStatus = 'deposit-paid';
     }
 
-    onAddBudgetItem({
-      title: title.trim(),
-      vendor: vendor.trim(),
-      category,
-      costType,
-      unitEstimated: est,
-      unitActual: act,
-      paidAmount: paid,
-      paymentStatus,
-    });
+    if (editingItemId) {
+      onUpdateBudgetItem({
+        id: editingItemId,
+        title: cleanTitle,
+        vendor: cleanVendor,
+        category,
+        costType,
+        unitEstimated: est,
+        unitActual: act,
+        paidAmount: paid,
+        paymentStatus,
+      });
+    } else {
+      onAddBudgetItem({
+        title: cleanTitle,
+        vendor: cleanVendor,
+        category,
+        costType,
+        unitEstimated: est,
+        unitActual: act,
+        paidAmount: paid,
+        paymentStatus,
+      });
+    }
 
-    setTitle('');
-    setVendor('');
-    setUnitEstimated('');
-    setUnitActual('');
-    setPaidAmount('0');
+    resetFormState();
   };
 
   const maxScaleDenominator = Math.max(
@@ -162,6 +229,23 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
     100,
     Math.round((chartData.paidTotal / maxScaleDenominator) * 100)
   );
+
+  const previewIsSignificant = useMemo((): boolean => {
+    const est = Number(unitEstimated) || 0;
+    const act = Number(unitActual) || 0;
+    if (est <= 0 && act <= 0) return false;
+    return isSignificantBudgetItem(
+      { costType, unitEstimated: est, unitActual: act },
+      budgetMetrics.confirmedHeadcount,
+      budgetMetrics.targetBudget
+    );
+  }, [
+    costType,
+    unitEstimated,
+    unitActual,
+    budgetMetrics.confirmedHeadcount,
+    budgetMetrics.targetBudget,
+  ]);
 
   return (
     <div className="space-y-6">
@@ -238,6 +322,91 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Real-Time Budget Persistence & Significant Expenditure Confirmation Banner */}
+      {latestBudgetToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="budget-persistence-banner"
+          className={`rounded-xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            latestBudgetToast.isSignificant
+              ? 'bg-slate-900 border-slate-700 text-white'
+              : 'bg-emerald-50/90 border-emerald-200 text-emerald-950'
+          }`}
+        >
+          <div className="flex items-start gap-2.5">
+            {latestBudgetToast.isSignificant ? (
+              <Sparkles
+                className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5"
+                aria-hidden="true"
+              />
+            ) : (
+              <CheckCircle2
+                className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5"
+                aria-hidden="true"
+              />
+            )}
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold">
+                  {latestBudgetToast.title}
+                </span>
+                <span
+                  className={`text-[11px] font-mono tabular-nums font-semibold px-2 py-0.5 rounded ${
+                    latestBudgetToast.isSignificant
+                      ? 'bg-slate-800 text-emerald-300 border border-slate-700'
+                      : 'bg-emerald-100 text-emerald-900'
+                  }`}
+                >
+                  {formatCurrency(latestBudgetToast.effectiveAmount)}
+                </span>
+                {latestBudgetToast.isSignificant && (
+                  <span className="text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                    High-Impact Commitment (&ge;$1k / &ge;5% Budget)
+                  </span>
+                )}
+              </div>
+              <p
+                className={`text-xs ${
+                  latestBudgetToast.isSignificant
+                    ? 'text-slate-200'
+                    : 'text-emerald-900'
+                }`}
+              >
+                {latestBudgetToast.message}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span
+              className={`text-[11px] font-mono tabular-nums inline-flex items-center gap-1 px-2.5 py-1 rounded-lg ${
+                latestBudgetToast.isSignificant
+                  ? 'bg-slate-800 text-slate-300'
+                  : 'bg-white/80 text-emerald-800 border border-emerald-200'
+              }`}
+            >
+              <Database className="w-3 h-3 shrink-0" aria-hidden="true" />
+              Persisted
+            </span>
+            {onDismissBudgetToast && (
+              <button
+                type="button"
+                onClick={(): void => onDismissBudgetToast(latestBudgetToast.id)}
+                aria-label="Dismiss budget persistence confirmation"
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  latestBudgetToast.isSignificant
+                    ? 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    : 'text-emerald-700 hover:bg-emerald-100'
+                }`}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Visual Warning Banner for Categories Exceeding Projected Amount by > 10% */}
       {chartData.exceedingCategories.length > 0 && (
@@ -850,7 +1019,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                       <select
                         aria-label={`Payment status for "${line.title}"`}
                         value={line.paymentStatus}
-                        onChange={(e) =>
+                        onChange={(e): void =>
                           onUpdatePaymentStatus(
                             line.id,
                             e.target.value as PaymentStatus
@@ -864,14 +1033,29 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                       </select>
                     </td>
                     <td className="py-3 pl-2 text-right whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => onDeleteBudgetItem(line.id)}
-                        aria-label={`Remove budget item "${line.title}"`}
-                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50 transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="inline-flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          data-testid={`edit-budget-item-${line.id}`}
+                          onClick={(): void => handleStartEditLine(line)}
+                          aria-label={`Edit budget item "${line.title}"`}
+                          className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                            editingItemId === line.id
+                              ? 'bg-slate-900 text-white'
+                              : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                          }`}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(): void => onDeleteBudgetItem(line.id)}
+                          aria-label={`Remove budget item "${line.title}"`}
+                          className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -881,13 +1065,30 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
           </div>
         </div>
 
-        {/* Right 4 Cols: Add Expense Line Item Form */}
+        {/* Right 4 Cols: Add or Update Expense Line Item Form */}
         <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 p-6">
-          <h3 className="text-base font-bold text-slate-900 mb-1">
-            Add Budget Line Item
-          </h3>
+          <div className="flex items-start justify-between gap-2 mb-1">
+            <h3 className="text-base font-bold text-slate-900">
+              {editingItemId
+                ? 'Update Budget Line Item'
+                : 'Add Budget Line Item'}
+            </h3>
+            {editingItemId && (
+              <button
+                type="button"
+                onClick={resetFormState}
+                aria-label="Cancel editing budget item"
+                className="text-xs font-medium text-slate-500 hover:text-slate-900 inline-flex items-center gap-1 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                Cancel Edit
+              </button>
+            )}
+          </div>
           <p id="budget-form-help" className="text-xs text-slate-500 mb-4">
-            Choose Fixed Fee or Per-Guest Variable scaling.
+            {editingItemId
+              ? 'Modify projected or actual figures to trigger real-time ledger recalculation and cloud persistence.'
+              : 'Choose Fixed Fee or Per-Guest Variable scaling. Significant items (>=$1,000 or >=5% of budget) trigger persistence alerts.'}
           </p>
 
           <form
@@ -919,7 +1120,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                 value={title}
                 aria-label="Expense description"
                 aria-describedby="budget-form-help"
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e): void => setTitle(e.target.value)}
                 placeholder="e.g., Late-Night Espresso Cart"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
@@ -939,7 +1140,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                   value={vendor}
                   aria-label="Vendor name"
                   aria-describedby="budget-form-help"
-                  onChange={(e) => setVendor(e.target.value)}
+                  onChange={(e): void => setVendor(e.target.value)}
                   placeholder="e.g., Linea Roasters"
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -957,7 +1158,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                   value={category}
                   aria-label="Budget category"
                   aria-describedby="budget-form-help"
-                  onChange={(e) =>
+                  onChange={(e): void =>
                     setCategory(e.target.value as BudgetCategory)
                   }
                   className="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
@@ -998,7 +1199,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                   type="button"
                   aria-label="Use Fixed Flat Fee calculation mode"
                   aria-pressed={costType === 'fixed'}
-                  onClick={() => setCostType('fixed')}
+                  onClick={(): void => setCostType('fixed')}
                   className={`py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
                     costType === 'fixed'
                       ? 'bg-white text-slate-900 shadow-xs'
@@ -1011,7 +1212,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                   type="button"
                   aria-label="Use Per Confirmed Guest calculation mode"
                   aria-pressed={costType === 'per-guest'}
-                  onClick={() => setCostType('per-guest')}
+                  onClick={(): void => setCostType('per-guest')}
                   className={`py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
                     costType === 'per-guest'
                       ? 'bg-white text-slate-900 shadow-xs'
@@ -1040,7 +1241,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                   value={unitEstimated}
                   aria-label="Estimated unit cost in dollars"
                   aria-describedby="budget-form-help"
-                  onChange={(e) => setUnitEstimated(e.target.value)}
+                  onChange={(e): void => setUnitEstimated(e.target.value)}
                   placeholder={costType === 'per-guest' ? '45' : '1500'}
                   className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -1062,7 +1263,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                   value={unitActual}
                   aria-label="Actual unit cost in dollars"
                   aria-describedby="budget-form-help"
-                  onChange={(e) => setUnitActual(e.target.value)}
+                  onChange={(e): void => setUnitActual(e.target.value)}
                   placeholder={costType === 'per-guest' ? '45' : '1500'}
                   className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
@@ -1081,13 +1282,42 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
               </div>
             )}
 
+            {previewIsSignificant && (
+              <div
+                data-testid="significant-item-preview-badge"
+                className="p-2.5 rounded-lg bg-slate-900 text-white text-xs flex items-center justify-between gap-2"
+              >
+                <span className="inline-flex items-center gap-1.5 font-medium">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  Significant Budget Item (&ge;$1,000 / &ge;5% ceiling)
+                </span>
+                <span className="font-mono tabular-nums text-[11px] text-emerald-300">
+                  Real-time toast alert active
+                </span>
+              </div>
+            )}
+
             <button
               type="submit"
-              aria-label="Add expense line item to event budget"
+              data-testid="budget-submit-button"
+              aria-label={
+                editingItemId
+                  ? 'Save updated expense line item to event budget'
+                  : 'Add expense line item to event budget'
+              }
               className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
             >
-              <Plus className="w-4 h-4" />
-              Add Expense Line Item
+              {editingItemId ? (
+                <>
+                  <Save className="w-4 h-4" />
+                  Save Updated Line Item
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" />
+                  Add Expense Line Item
+                </>
+              )}
             </button>
           </form>
         </div>
@@ -1095,3 +1325,4 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
     </div>
   );
 };
+

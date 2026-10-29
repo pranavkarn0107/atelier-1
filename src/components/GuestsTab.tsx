@@ -22,6 +22,9 @@ interface GuestsTabProps {
   onDeleteGuest: (guestId: string) => void;
 }
 
+/**
+ * Renders the guest RSVP, plus-one stepper, dietary breakdown, and table assignment manager.
+ */
 export const GuestsTab: React.FC<GuestsTabProps> = ({
   guests,
   guestMetrics,
@@ -32,7 +35,7 @@ export const GuestsTab: React.FC<GuestsTabProps> = ({
   onUpdatePlusOnes,
   onUpdateTable,
   onDeleteGuest,
-}) => {
+}): React.ReactElement => {
   const [rsvpFilter, setRsvpFilter] = useState<'all' | RsvpStatus>('all');
   const [dietaryFilter, setDietaryFilter] = useState<'All' | DietaryRestriction>('All');
   const [searchQuery, setSearchQuery] = useState('');

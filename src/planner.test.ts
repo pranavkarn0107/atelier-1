@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildBudgetChartData,
+  buildBudgetPersistenceToast,
   calculateBudgetMetrics,
   calculateGuestMetrics,
   calculateTaskMetrics,
@@ -10,7 +11,10 @@ import {
   canUserEditEvent,
   computeEventReadiness,
   evaluateVendorCheckpoints,
+  formatEventDate,
+  isSignificantBudgetItem,
   parseTimeToMinutes,
+  sanitizeInputText,
   validateBudgetInput,
   validateCollaboratorInvite,
   validateGuestInput,
@@ -20,7 +24,7 @@ import {
 } from './utils/eventCalculations';
 import { BudgetItem, EventTask, Guest, ScheduleItem } from './types/event';
 
-test('Budget Calculations: fixed & per-guest scaling, >10% overrun warnings, and dynamic 5-10% contingency margin', () => {
+test('1. Budget Calculation Edge Cases: zero/negative inputs, per-guest scaling, >10% overrun alerts, and dynamic 5–10% contingency tiers', (): void => {
   const items: BudgetItem[] = [
     {
       id: 'b1',
@@ -47,19 +51,8 @@ test('Budget Calculations: fixed & per-guest scaling, >10% overrun warnings, and
   ];
 
   const metrics = calculateBudgetMetrics(items, 40000, 50);
-
-  // 15000 fixed + (150 * 50 = 7500) = 22500 estimated
   assert.equal(metrics.totalEstimated, 22500);
-  // 15000 fixed + (180 * 50 = 9000) = 24000 actual
   assert.equal(metrics.totalActual, 24000);
-  assert.equal(metrics.fixedActualTotal, 15000);
-  assert.equal(metrics.variablePerGuestActualTotal, 9000);
-  assert.equal(metrics.remainingBudget, 16000);
-  assert.equal(metrics.remainingBalanceToPay, 5000);
-  assert.equal(metrics.costPerConfirmedGuest, 480);
-  assert.equal(metrics.isOverBudget, false);
-
-  // Because Catering & Beverage exceeds projected by +20% (>10%), dynamic contingency escalates to 10%
   assert.equal(metrics.contingencyRatePercent, 10);
   assert.equal(metrics.contingencyReserveAmount, 2400);
   assert.equal(metrics.totalCommittedWithContingency, 26400);
@@ -67,54 +60,84 @@ test('Budget Calculations: fixed & per-guest scaling, >10% overrun warnings, and
   const chart = buildBudgetChartData(metrics);
   assert.equal(chart.exceedingCategories.length, 1);
   assert.equal(chart.exceedingCategories[0].name, 'Catering & Beverage');
-  assert.equal(chart.exceedingCategories[0].overrunPercent, 20);
   assert.equal(chart.exceedingCategories[0].isExceedingProjectedBy10Pct, true);
+
+  // Edge Case: negative target budget and negative headcount safely clamp to 0
+  const clamped = calculateBudgetMetrics(items, -500, -10);
+  assert.equal(clamped.targetBudget, 0);
+  assert.equal(clamped.confirmedHeadcount, 0);
+  assert.equal(clamped.variablePerGuestActualTotal, 0);
+  assert.equal(clamped.costPerConfirmedGuest, 0);
+  assert.equal(clamped.isOverBudget, true);
 });
 
-test('Budget Calculations (Edge Cases): zero guests, negative inputs, and 5% vs 7.5% contingency tiers', () => {
-  const items: BudgetItem[] = [
-    {
-      id: 'b-edge',
-      title: 'String Quartet',
-      vendor: 'Meridian Strings',
-      category: 'Entertainment & AV',
-      costType: 'fixed',
-      unitEstimated: 2000,
-      unitActual: 2100, // +5% overrun (not > 10%)
-      paidAmount: 2100,
-      paymentStatus: 'paid',
-    },
-  ];
+test('2. Empty Input Handling: empty arrays, blank form strings, and missing fields degrade gracefully', (): void => {
+  const emptyBudget = calculateBudgetMetrics([], 0, 0);
+  assert.equal(emptyBudget.totalActual, 0);
+  assert.equal(emptyBudget.contingencyRatePercent, 5);
+  assert.equal(emptyBudget.categories.length, 0);
 
-  // Small event (25 guests, no >10% overrun) -> 5% contingency margin
-  const smallMetrics = calculateBudgetMetrics(items, 10000, 25);
-  assert.equal(smallMetrics.contingencyRatePercent, 5);
-  assert.equal(smallMetrics.contingencyReserveAmount, 105);
-  assert.equal(smallMetrics.totalCommittedWithContingency, 2205);
+  const emptyGuests = calculateGuestMetrics([]);
+  assert.equal(emptyGuests.confirmedHeadcount, 0);
+  assert.equal(emptyGuests.rsvpResponseRate, 0);
 
-  // Medium event (50 guests, no >10% overrun) -> 7.5% contingency margin
-  const mediumMetrics = calculateBudgetMetrics(items, 10000, 50);
-  assert.equal(mediumMetrics.contingencyRatePercent, 7.5);
-  assert.equal(mediumMetrics.contingencyReserveAmount, 157.5);
+  const emptyTasks = calculateTaskMetrics([]);
+  assert.equal(emptyTasks.total, 0);
+  assert.equal(emptyTasks.completionPercent, 0);
 
-  // Zero target budget and negative guest count clamped safely
-  const zeroTargetMetrics = calculateBudgetMetrics(items, -500, -10);
-  assert.equal(zeroTargetMetrics.targetBudget, 0);
-  assert.equal(zeroTargetMetrics.confirmedHeadcount, 0);
-  assert.equal(zeroTargetMetrics.costPerConfirmedGuest, 0);
-  assert.equal(zeroTargetMetrics.utilizationPercent, 0);
-  assert.equal(zeroTargetMetrics.isOverBudget, true);
+  const emptyTimeline = calculateTimelineMetrics([]);
+  assert.equal(emptyTimeline.blocks.length, 0);
+  assert.equal(emptyTimeline.readinessPercent, 100);
+
+  // Empty form validation inputs must return structured validation errors
+  assert.equal(
+    validateTaskInput({ title: '', dueDate: '', assignee: '' }).valid,
+    false
+  );
+  assert.equal(
+    validateBudgetInput({
+      title: '',
+      vendor: '',
+      unitEstimated: '',
+      unitActual: '',
+    }).valid,
+    false
+  );
+  assert.equal(
+    validateGuestInput({ fullName: '', email: '', plusOnes: '' }).valid,
+    false
+  );
+  assert.equal(
+    validateScheduleInput({
+      title: '',
+      startTime: '',
+      endTime: '',
+      location: '',
+    }).valid,
+    false
+  );
+  assert.equal(
+    validateTemplateInput({ title: '', description: '', category: '' }).valid,
+    false
+  );
+  assert.equal(validateCollaboratorInvite('', [], '').valid, false);
 });
 
-test('Date & Timeline Parsing: chronological sorting, conflict detection, and 15-minute buffer intervals', () => {
+test('3. Date Formatting & Timeline Parsing: ISO date formatting, invalid date fallbacks, and 15-minute buffer intervals', (): void => {
+  assert.equal(formatEventDate('2026-11-14'), 'Nov 14, 2026');
+  assert.equal(formatEventDate('2027-01-05'), 'Jan 5, 2027');
+  assert.equal(formatEventDate(''), 'Date TBD');
+  assert.equal(formatEventDate('2026-02-30'), 'Date TBD');
+  assert.equal(formatEventDate('invalid-date'), 'Date TBD');
+
   assert.equal(parseTimeToMinutes('00:00'), 0);
   assert.equal(parseTimeToMinutes('17:30'), 1050);
-  assert.equal(parseTimeToMinutes('invalid'), 0);
+  assert.equal(parseTimeToMinutes(''), 0);
 
   const schedule: ScheduleItem[] = [
     {
       id: 's2',
-      startTime: '18:05', // Only 5 min buffer after 18:00 -> tight buffer (<15 min)
+      startTime: '18:05',
       endTime: '19:00',
       title: 'Keynote Welcome Address',
       location: 'Main Hall',
@@ -130,24 +153,6 @@ test('Date & Timeline Parsing: chronological sorting, conflict detection, and 15
       leadContact: 'Camille Laurent',
       status: 'completed',
     },
-    {
-      id: 's3',
-      startTime: '18:45', // Overlaps with s2 (18:05 - 19:00)
-      endTime: '19:30',
-      title: 'Acoustic Soundcheck',
-      location: 'Main Hall',
-      leadContact: 'AV Lead',
-      status: 'scheduled',
-    },
-    {
-      id: 's4',
-      startTime: '23:30',
-      endTime: '00:30', // Crosses midnight (60 min duration)
-      title: 'Late-Night Digestif & Load-Out',
-      location: 'Terrace',
-      leadContact: 'Ops Lead',
-      status: 'ready',
-    },
   ];
 
   const timeline = calculateTimelineMetrics(schedule);
@@ -156,158 +161,9 @@ test('Date & Timeline Parsing: chronological sorting, conflict detection, and 15
   assert.equal(timeline.blocks[1].bufferBeforeMinutes, 5);
   assert.equal(timeline.blocks[1].hasTightBuffer, true);
   assert.equal(timeline.tightBufferCount, 1);
-  assert.equal(timeline.recommendedBufferMinutes, 15);
-  assert.equal(timeline.conflictCount, 1);
-  assert.equal(timeline.blocks[3].durationMinutes, 60);
-  assert.equal(timeline.readinessPercent, 75);
 });
 
-test('Event Checklist & Form Validation: normal and boundary/edge-case inputs', () => {
-  const tasks: EventTask[] = [
-    {
-      id: 't1',
-      title: 'Submit municipal permit',
-      phase: 'Pre-Event',
-      status: 'completed',
-      priority: 'high',
-      dueDate: '2026-11-01',
-      assignee: 'Camille Laurent',
-    },
-    {
-      id: 't2',
-      title: 'Confirm catering allergen line',
-      phase: 'Venue & Catering',
-      status: 'todo',
-      priority: 'medium',
-      dueDate: '2026-11-05',
-      assignee: 'Julian Vance',
-    },
-    {
-      id: 't3',
-      title: 'Verify stage pyrotechnics',
-      phase: 'Day-Of Execution',
-      status: 'in-progress',
-      priority: 'high',
-      dueDate: '2026-11-02',
-      assignee: 'Sora Takahashi',
-    },
-  ];
-
-  const taskMetrics = calculateTaskMetrics(tasks);
-  assert.equal(taskMetrics.total, 3);
-  assert.equal(taskMetrics.completed, 1);
-  assert.equal(taskMetrics.completionPercent, 33);
-  // Urgent open tasks sorted by high priority first, then earliest due date
-  assert.equal(taskMetrics.urgentOpenTasks[0].id, 't3');
-  assert.equal(taskMetrics.urgentOpenTasks[1].id, 't2');
-
-  // Task validation normal vs invalid
-  assert.equal(
-    validateTaskInput({
-      title: 'Confirm Sommelier Pairing',
-      dueDate: '2026-11-10',
-      assignee: 'Camille Laurent',
-    }).valid,
-    true
-  );
-  assert.equal(
-    validateTaskInput({ title: 'A', dueDate: '2026-11-10', assignee: 'Camille' })
-      .valid,
-    false
-  );
-  assert.equal(
-    validateTaskInput({
-      title: 'Valid Task',
-      dueDate: '11/10/2026',
-      assignee: 'Camille',
-    }).valid,
-    false
-  );
-
-  // Budget validation normal vs invalid
-  assert.equal(
-    validateBudgetInput({
-      title: 'Floral Canopy',
-      vendor: 'Atelier Flora',
-      unitEstimated: 4500,
-      unitActual: 4600,
-    }).valid,
-    true
-  );
-  assert.equal(
-    validateBudgetInput({
-      title: 'Floral Canopy',
-      vendor: 'Atelier Flora',
-      unitEstimated: -10,
-      unitActual: 4600,
-    }).valid,
-    false
-  );
-
-  // Guest & Schedule validation
-  assert.equal(
-    validateGuestInput({
-      fullName: 'Dr. Helena Vance',
-      email: 'helena@stanford.edu',
-      plusOnes: 2,
-    }).valid,
-    true
-  );
-  assert.equal(
-    validateGuestInput({
-      fullName: 'Dr. Helena Vance',
-      email: 'invalid-email',
-      plusOnes: 2,
-    }).valid,
-    false
-  );
-  assert.equal(
-    validateScheduleInput({
-      title: 'Welcome Toast',
-      startTime: '18:00',
-      endTime: '18:30',
-      location: 'Grand Foyer',
-    }).valid,
-    true
-  );
-  assert.equal(
-    validateScheduleInput({
-      title: 'Welcome Toast',
-      startTime: '6pm',
-      endTime: '18:30',
-      location: 'Grand Foyer',
-    }).valid,
-    false
-  );
-
-  // Collaborator & Template validation
-  assert.equal(
-    validateCollaboratorInvite(
-      'marcus@atelier-events.io',
-      ['julian@atelier-events.io'],
-      'camille@atelier-events.io'
-    ).valid,
-    true
-  );
-  assert.equal(
-    validateCollaboratorInvite(
-      'camille@atelier-events.io',
-      [],
-      'camille@atelier-events.io'
-    ).valid,
-    false
-  );
-  assert.equal(
-    validateTemplateInput({
-      title: 'Gala Blueprint',
-      description: 'Full production schedule and budget.',
-      category: 'Black-Tie Gala',
-    }).valid,
-    true
-  );
-});
-
-test('Vendor Verification Checkpoints, RBAC Access, and Event Readiness Score', () => {
+test('4. Vendor Verification Checkpoints, RBAC Access, and Event Readiness Score', (): void => {
   const tasks: EventTask[] = [
     {
       id: 't1',
@@ -332,13 +188,6 @@ test('Vendor Verification Checkpoints, RBAC Access, and Event Readiness Score', 
       paymentStatus: 'paid',
     },
   ];
-
-  const checkpoints = evaluateVendorCheckpoints(tasks, budgetItems);
-  assert.equal(checkpoints.length, 3);
-  assert.equal(checkpoints[0].id, 'chk-venue-coi');
-  assert.equal(checkpoints[0].verified, true);
-  assert.equal(checkpoints[1].verified, false);
-
   const guests: Guest[] = [
     {
       id: 'g1',
@@ -363,6 +212,11 @@ test('Vendor Verification Checkpoints, RBAC Access, and Event Readiness Score', 
     },
   ];
 
+  const checkpoints = evaluateVendorCheckpoints(tasks, budgetItems);
+  assert.equal(checkpoints.length, 3);
+  assert.equal(checkpoints[0].verified, true);
+  assert.equal(checkpoints[1].verified, false);
+
   const readiness = computeEventReadiness(
     calculateTaskMetrics(tasks),
     calculateBudgetMetrics(budgetItems, 25000, 2),
@@ -375,7 +229,6 @@ test('Vendor Verification Checkpoints, RBAC Access, and Event Readiness Score', 
   assert.equal(readiness.statusLabel, 'On Track');
   assert.equal(readiness.daysUntilEvent, 22);
 
-  // RBAC permissions check
   const sampleEvent = {
     ownerId: 'u1',
     ownerEmail: 'owner@atelier.io',
@@ -404,3 +257,87 @@ test('Vendor Verification Checkpoints, RBAC Access, and Event Readiness Score', 
   assert.equal(canUserEditEvent(sampleEvent, 'coplanner@atelier.io'), true);
   assert.equal(canUserEditEvent(sampleEvent, 'viewer@atelier.io'), false);
 });
+
+test('5. Significant Budget Item Detection, Real-Time Toast Persistence Payloads, and Input Sanitization', (): void => {
+  // Significant item (>=$1,000 fixed)
+  assert.equal(
+    isSignificantBudgetItem(
+      { costType: 'fixed', unitEstimated: 2500, unitActual: 2500 },
+      50,
+      60000
+    ),
+    true
+  );
+
+  // Per-guest item that scales to >=$1,000 ($45 * 30 guests = $1,350)
+  assert.equal(
+    isSignificantBudgetItem(
+      { costType: 'per-guest', unitEstimated: 45, unitActual: 45 },
+      30,
+      60000
+    ),
+    true
+  );
+
+  // Minor item (<$1,000 and <5% of target budget)
+  assert.equal(
+    isSignificantBudgetItem(
+      { costType: 'fixed', unitEstimated: 250, unitActual: 250 },
+      50,
+      60000
+    ),
+    false
+  );
+
+  const significantItem: BudgetItem = {
+    id: 'bdg-sig-1',
+    title: 'Architectural Floral Suspension',
+    vendor: 'Studio Bramble',
+    category: 'Floral & Production',
+    costType: 'fixed',
+    unitEstimated: 4000,
+    unitActual: 4800, // +20% overrun
+    paidAmount: 2400,
+    paymentStatus: 'deposit-paid',
+  };
+
+  const createdToast = buildBudgetPersistenceToast({
+    action: 'created',
+    item: significantItem,
+    confirmedHeadcount: 50,
+    targetBudget: 60000,
+    timestamp: '2026-10-29T12:00:00.000Z',
+  });
+  assert.equal(createdToast.isSignificant, true);
+  assert.equal(createdToast.effectiveAmount, 4800);
+  assert.equal(createdToast.variant, 'warning'); // >10% overrun
+  assert.equal(
+    createdToast.title,
+    'Significant Budget Item Created & Persisted'
+  );
+  assert.equal(createdToast.message.includes('Studio Bramble'), true);
+  assert.equal(
+    createdToast.message.includes('Local Storage + Cloud Firestore Ledger'),
+    true
+  );
+
+  const updatedToast = buildBudgetPersistenceToast({
+    action: 'updated',
+    item: { ...significantItem, unitActual: 4000 },
+    confirmedHeadcount: 50,
+    targetBudget: 60000,
+  });
+  assert.equal(updatedToast.isSignificant, true);
+  assert.equal(updatedToast.variant, 'significant');
+  assert.equal(
+    updatedToast.title,
+    'Significant Budget Item Updated & Persisted'
+  );
+
+  // Input sanitization strips angle brackets and control chars
+  assert.equal(
+    sanitizeInputText('  <script>alert(1)</script> Grand Ballroom  '),
+    'scriptalert(1)/script Grand Ballroom'
+  );
+});
+

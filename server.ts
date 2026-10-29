@@ -1,9 +1,17 @@
 import 'dotenv/config';
-import express from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
+import {
+  BUDGET_TIERS,
+  GUEST_LIMITS,
+  HttpStatus,
+  SECURITY_HEADERS,
+  SERVER_CONFIG,
+} from './src/constants';
+import { sanitizeInputText } from './src/utils/eventCalculations';
 import {
   SEED_EVENTS,
   SEED_TEMPLATES,
@@ -20,16 +28,19 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function getGeminiClient(): GoogleGenAI | null {
+/**
+ * Initializes the GoogleGenAI SDK client when a valid GEMINI_API_KEY is configured in the environment.
+ */
+export function getGeminiClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+  if (!apiKey || apiKey === SERVER_CONFIG.PLACEHOLDER_API_KEY) {
     return null;
   }
   return new GoogleGenAI({
     apiKey,
     httpOptions: {
       headers: {
-        'User-Agent': 'aistudio-build',
+        'User-Agent': SERVER_CONFIG.USER_AGENT,
       },
     },
   });
@@ -69,7 +80,11 @@ Strictly enforce these three production guardrails in every recommendation, time
 2. Dynamic Contingency Budget Margins (5–10%): Always preserve a dynamic 5–10% contingency budget reserve (5% for intimate gatherings, 7.5% for mid-sized receptions, 10% for 80+ guest galas or high-variance categories).
 3. Vendor Verification Checkpoints: Require explicit vendor verification checkpoints for Certificate of Insurance (COI), municipal/fire permits, dedicated allergen kitchen lines, and contract deposit milestones.`;
 
-function buildCuratedRecommendations(params: {
+/**
+ * Generates deterministic, budget-calibrated vendor, decor, and entertainment recommendations
+ * when the live Gemini API is unavailable or unconfigured.
+ */
+export function buildCuratedRecommendations(params: {
   name: string;
   category: string;
   city: string;
@@ -77,20 +92,35 @@ function buildCuratedRecommendations(params: {
   expectedGuests: number;
 }): VendorRecommendation[] {
   const city = params.city || 'San Francisco, CA';
-  const contingencyRate = params.expectedGuests >= 80 ? 10 : 7.5;
+  const contingencyRate =
+    params.expectedGuests >= BUDGET_TIERS.HIGH_CONTINGENCY_GUEST_THRESHOLD
+      ? BUDGET_TIERS.HIGH_CONTINGENCY_PERCENT
+      : BUDGET_TIERS.MID_CONTINGENCY_PERCENT;
   const perPersonCatering = Math.max(
-    95,
+    BUDGET_TIERS.MIN_CATERING_PER_GUEST,
     Math.min(
-      320,
+      BUDGET_TIERS.MAX_CATERING_PER_GUEST,
       Math.round(
-        (params.targetBudget * 0.34) / Math.max(20, params.expectedGuests)
+        (params.targetBudget * BUDGET_TIERS.CATERING_ALLOCATION_SHARE) /
+          Math.max(
+            BUDGET_TIERS.MIN_CATERING_GUEST_DIVISOR,
+            params.expectedGuests
+          )
       )
     )
   );
-  const venueEstimate = Math.round(params.targetBudget * 0.26);
-  const photoEstimate = Math.round(params.targetBudget * 0.09);
-  const decorEstimate = Math.round(params.targetBudget * 0.12);
-  const entertainmentEstimate = Math.round(params.targetBudget * 0.08);
+  const venueEstimate = Math.round(
+    params.targetBudget * BUDGET_TIERS.VENUE_ALLOCATION_SHARE
+  );
+  const photoEstimate = Math.round(
+    params.targetBudget * BUDGET_TIERS.PHOTO_ALLOCATION_SHARE
+  );
+  const decorEstimate = Math.round(
+    params.targetBudget * BUDGET_TIERS.DECOR_ALLOCATION_SHARE
+  );
+  const entertainmentEstimate = Math.round(
+    params.targetBudget * BUDGET_TIERS.ENTERTAINMENT_ALLOCATION_SHARE
+  );
 
   return [
     {
@@ -165,61 +195,81 @@ function buildCuratedRecommendations(params: {
   ];
 }
 
-async function startServer(): Promise<void> {
+/**
+ * Bootstraps and starts the Express + Vite application server on port 3000.
+ */
+export async function startServer(): Promise<void> {
   const app = express();
-  const PORT = 3000;
+  const PORT = SERVER_CONFIG.DEFAULT_PORT;
 
-  app.use(express.json({ limit: '2mb' }));
+  app.use((_req: Request, res: Response, next: NextFunction): void => {
+    res.setHeader(
+      'X-Content-Type-Options',
+      SECURITY_HEADERS.X_CONTENT_TYPE_OPTIONS
+    );
+    res.setHeader('X-Frame-Options', SECURITY_HEADERS.X_FRAME_OPTIONS);
+    res.setHeader('Referrer-Policy', SECURITY_HEADERS.REFERRER_POLICY);
+    next();
+  });
+
+  app.use(express.json({ limit: SERVER_CONFIG.JSON_BODY_LIMIT }));
 
   let eventsStore: CelebrationEvent[] = structuredClone(SEED_EVENTS);
   let templatesStore: EventTemplate[] = structuredClone(SEED_TEMPLATES);
   let themesStore: DashboardTheme[] = structuredClone(SEED_THEMES);
 
-  app.get('/api/health', (_req, res) => {
-    res.json({
+  app.get('/api/health', (_req: Request, res: Response): void => {
+    res.status(HttpStatus.OK).json({
       status: 'ok',
-      service: 'atelier-cloud-sync',
+      service: SERVER_CONFIG.HEALTH_SERVICE_NAME,
       timestamp: new Date().toISOString(),
     });
   });
 
-  // Events CRUD & Collaborator Sync
-  app.get('/api/events', (_req, res) => {
-    res.json({
+  app.get('/api/events', (_req: Request, res: Response): void => {
+    res.status(HttpStatus.OK).json({
       events: eventsStore,
       syncedAt: new Date().toISOString(),
     });
   });
 
-  app.post('/api/events', (req, res) => {
+  app.post('/api/events', (req: Request, res: Response): void => {
     try {
       const incoming = req.body as Partial<CelebrationEvent> | undefined;
       if (!incoming || !incoming.id || !incoming.name) {
-        res.status(400).json({ error: 'Invalid event payload.' });
+        res
+          .status(HttpStatus.BAD_REQUEST)
+          .json({ error: 'Invalid event payload.' });
         return;
       }
       const syncedEvent: CelebrationEvent = {
         ...(incoming as CelebrationEvent),
         lastSyncedAt: new Date().toISOString(),
       };
-      const existingIndex = eventsStore.findIndex((e) => e.id === incoming.id);
+      const existingIndex = eventsStore.findIndex(
+        (e): boolean => e.id === incoming.id
+      );
       if (existingIndex >= 0) {
         eventsStore[existingIndex] = syncedEvent;
       } else {
         eventsStore.unshift(syncedEvent);
       }
-      res.status(201).json({ event: syncedEvent });
+      res.status(HttpStatus.CREATED).json({ event: syncedEvent });
     } catch {
-      res.status(500).json({ error: 'Unable to save event at this time.' });
+      res
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .json({ error: 'Unable to save event at this time.' });
     }
   });
 
-  app.put('/api/events/:id', (req, res) => {
+  app.put('/api/events/:id', (req: Request, res: Response): void => {
     try {
       const { id } = req.params;
       const incoming = req.body as Partial<CelebrationEvent> | undefined;
       if (!incoming || !incoming.name) {
-        res.status(400).json({ error: 'Invalid event update payload.' });
+        res
+          .status(HttpStatus.BAD_REQUEST)
+          .json({ error: 'Invalid event update payload.' });
         return;
       }
       const syncedEvent: CelebrationEvent = {
@@ -227,64 +277,71 @@ async function startServer(): Promise<void> {
         id,
         lastSyncedAt: new Date().toISOString(),
       };
-      const idx = eventsStore.findIndex((e) => e.id === id);
+      const idx = eventsStore.findIndex((e): boolean => e.id === id);
       if (idx >= 0) {
         eventsStore[idx] = syncedEvent;
       } else {
         eventsStore.push(syncedEvent);
       }
-      res.json({ event: syncedEvent });
+      res.status(HttpStatus.OK).json({ event: syncedEvent });
     } catch {
-      res.status(500).json({ error: 'Unable to update event workspace.' });
+      res
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .json({ error: 'Unable to update event workspace.' });
     }
   });
 
-  // Templates Marketplace API
-  app.get('/api/templates', (_req, res) => {
-    res.json({ templates: templatesStore });
+  app.get('/api/templates', (_req: Request, res: Response): void => {
+    res.status(HttpStatus.OK).json({ templates: templatesStore });
   });
 
-  app.post('/api/templates', (req, res) => {
+  app.post('/api/templates', (req: Request, res: Response): void => {
     try {
       const tpl = req.body as Partial<EventTemplate> | undefined;
       if (!tpl || !tpl.id || !tpl.title) {
-        res.status(400).json({ error: 'Invalid template payload.' });
+        res
+          .status(HttpStatus.BAD_REQUEST)
+          .json({ error: 'Invalid template payload.' });
         return;
       }
       const validTemplate = tpl as EventTemplate;
       templatesStore.unshift(validTemplate);
-      res.status(201).json({ template: validTemplate });
+      res.status(HttpStatus.CREATED).json({ template: validTemplate });
     } catch {
-      res.status(500).json({ error: 'Unable to publish template.' });
+      res
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .json({ error: 'Unable to publish template.' });
     }
   });
 
-  // Themes Marketplace API
-  app.get('/api/themes', (_req, res) => {
-    res.json({ themes: themesStore });
+  app.get('/api/themes', (_req: Request, res: Response): void => {
+    res.status(HttpStatus.OK).json({ themes: themesStore });
   });
 
-  app.post('/api/themes', (req, res) => {
+  app.post('/api/themes', (req: Request, res: Response): void => {
     try {
       const theme = req.body as Partial<DashboardTheme> | undefined;
       if (!theme || !theme.id || !theme.name) {
-        res.status(400).json({ error: 'Invalid theme payload.' });
+        res
+          .status(HttpStatus.BAD_REQUEST)
+          .json({ error: 'Invalid theme payload.' });
         return;
       }
       const validTheme = theme as DashboardTheme;
       themesStore.push(validTheme);
-      res.status(201).json({ theme: validTheme });
+      res.status(HttpStatus.CREATED).json({ theme: validTheme });
     } catch {
-      res.status(500).json({ error: 'Unable to save custom theme.' });
+      res
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .json({ error: 'Unable to save custom theme.' });
     }
   });
 
-  // Reset Demo Data
-  app.post('/api/events/reset', (_req, res) => {
+  app.post('/api/events/reset', (_req: Request, res: Response): void => {
     eventsStore = structuredClone(SEED_EVENTS);
     templatesStore = structuredClone(SEED_TEMPLATES);
     themesStore = structuredClone(SEED_THEMES);
-    res.json({
+    res.status(HttpStatus.OK).json({
       events: eventsStore,
       templates: templatesStore,
       themes: themesStore,
@@ -292,36 +349,39 @@ async function startServer(): Promise<void> {
     });
   });
 
-  // AI Recommendation Engine (Vendors, Décor, Entertainment)
-  app.post('/api/ai/recommend', async (req, res) => {
-    const body = (req.body || {}) as RecommendRequestBody;
-    const name = body.name || 'Celebration Event';
-    const category = body.category || 'Gala & Reception';
-    const date = body.date || '2026-11-14';
-    const venueName = body.venueName || 'Main Conservatory';
-    const city = body.city || 'San Francisco, CA';
-    const targetBudget = Number(body.targetBudget) || 50000;
-    const expectedGuests = Number(body.expectedGuests) || 80;
-    const focusArea = body.focusArea || 'All Categories';
+  app.post(
+    '/api/ai/recommend',
+    async (req: Request, res: Response): Promise<void> => {
+      const body = (req.body || {}) as RecommendRequestBody;
+      const name = body.name || 'Celebration Event';
+      const category = body.category || 'Gala & Reception';
+      const date = body.date || '2026-11-14';
+      const venueName = body.venueName || 'Main Conservatory';
+      const city = body.city || 'San Francisco, CA';
+      const targetBudget =
+        Number(body.targetBudget) || BUDGET_TIERS.DEFAULT_TARGET_BUDGET;
+      const expectedGuests =
+        Number(body.expectedGuests) || GUEST_LIMITS.DEFAULT_EXPECTED_GUESTS;
+      const focusArea = body.focusArea || 'All Categories';
 
-    const ai = getGeminiClient();
-    if (!ai) {
-      const fallback = buildCuratedRecommendations({
-        name,
-        category,
-        city,
-        targetBudget,
-        expectedGuests,
-      });
-      res.json({
-        recommendations: fallback,
-        modelUsed: 'atelier-curated-engine',
-      });
-      return;
-    }
+      const ai = getGeminiClient();
+      if (!ai) {
+        const fallback = buildCuratedRecommendations({
+          name,
+          category,
+          city,
+          targetBudget,
+          expectedGuests,
+        });
+        res.status(HttpStatus.OK).json({
+          recommendations: fallback,
+          modelUsed: SERVER_CONFIG.CURATED_ENGINE_ID,
+        });
+        return;
+      }
 
-    try {
-      const prompt = `Generate 5 tailored vendor, decoration, and entertainment recommendations for the following event:
+      try {
+        const prompt = `Generate 5 tailored vendor, decoration, and entertainment recommendations for the following event:
 - Event Name: ${name}
 - Event Type: ${category}
 - Date: ${date}
@@ -339,192 +399,204 @@ Include at least:
 
 In each item's rationale, explicitly note how it respects a 5-10% dynamic contingency budget margin, realistic 15-30 minute buffer intervals between event stages, and vendor verification checkpoints (COI insurance, permits, or deposit milestones).`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-        config: {
-          systemInstruction: PLANNER_SYSTEM_GUARDRAILS,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                category: {
-                  type: Type.STRING,
-                  description:
-                    'Must be one of: Venue, Caterer, Photographer, Decoration, Entertainment',
+        const response = await ai.models.generateContent({
+          model: SERVER_CONFIG.GEMINI_MODEL,
+          contents: prompt,
+          config: {
+            systemInstruction: PLANNER_SYSTEM_GUARDRAILS,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  category: {
+                    type: Type.STRING,
+                    description:
+                      'Must be one of: Venue, Caterer, Photographer, Decoration, Entertainment',
+                  },
+                  name: { type: Type.STRING },
+                  specialty: { type: Type.STRING },
+                  estimatedCost: { type: Type.NUMBER },
+                  costType: {
+                    type: Type.STRING,
+                    description: 'Must be fixed or per-guest',
+                  },
+                  rationale: { type: Type.STRING },
+                  location: { type: Type.STRING },
+                  rating: { type: Type.STRING },
                 },
-                name: { type: Type.STRING },
-                specialty: { type: Type.STRING },
-                estimatedCost: { type: Type.NUMBER },
-                costType: {
-                  type: Type.STRING,
-                  description: 'Must be fixed or per-guest',
-                },
-                rationale: { type: Type.STRING },
-                location: { type: Type.STRING },
-                rating: { type: Type.STRING },
+                required: [
+                  'category',
+                  'name',
+                  'specialty',
+                  'estimatedCost',
+                  'costType',
+                  'rationale',
+                  'location',
+                  'rating',
+                ],
               },
-              required: [
-                'category',
-                'name',
-                'specialty',
-                'estimatedCost',
-                'costType',
-                'rationale',
-                'location',
-                'rating',
-              ],
             },
           },
-        },
-      });
+        });
 
-      const rawText = response.text?.trim() || '[]';
-      const parsed = JSON.parse(rawText) as unknown;
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const validCategories: VendorRecommendation['category'][] = [
-          'Venue',
-          'Caterer',
-          'Photographer',
-          'Decoration',
-          'Entertainment',
-        ];
-        const mapped: VendorRecommendation[] = (
-          parsed as RawAiRecommendationItem[]
-        ).map((item, idx) => {
-          const matchedCategory = validCategories.find(
-            (c) => c === item.category
-          );
-          return {
-            id: `ai-rec-${Date.now()}-${idx}`,
-            category: matchedCategory || 'Venue',
-            name: String(item.name || 'Curated Partner'),
-            specialty: String(item.specialty || 'Bespoke event production'),
-            estimatedCost: Math.max(0, Number(item.estimatedCost) || 1500),
-            costType: item.costType === 'per-guest' ? 'per-guest' : 'fixed',
-            rationale: String(item.rationale || ''),
-            location: String(item.location || city),
-            rating: String(item.rating || '4.9 / 5.0'),
-            sourceLabel: 'Gemini 3.8 Flash + Vendor Index',
-          };
-        });
-        res.json({
-          recommendations: mapped,
-          modelUsed: 'gemini-3.8-flash',
-        });
+        const rawText = response.text?.trim() || '[]';
+        const parsed = JSON.parse(rawText) as unknown;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const validCategories: VendorRecommendation['category'][] = [
+            'Venue',
+            'Caterer',
+            'Photographer',
+            'Decoration',
+            'Entertainment',
+          ];
+          const mapped: VendorRecommendation[] = (
+            parsed as RawAiRecommendationItem[]
+          ).map((item, idx): VendorRecommendation => {
+            const matchedCategory = validCategories.find(
+              (c): boolean => c === item.category
+            );
+            return {
+              id: `ai-rec-${Date.now()}-${idx}`,
+              category: matchedCategory || 'Venue',
+              name: String(item.name || 'Curated Partner'),
+              specialty: String(item.specialty || 'Bespoke event production'),
+              estimatedCost: Math.max(
+                BUDGET_TIERS.MIN_BUDGET,
+                Number(item.estimatedCost) || BUDGET_TIERS.FALLBACK_ITEM_COST
+              ),
+              costType: item.costType === 'per-guest' ? 'per-guest' : 'fixed',
+              rationale: String(item.rationale || ''),
+              location: String(item.location || city),
+              rating: String(item.rating || '4.9 / 5.0'),
+              sourceLabel: 'Gemini 3.8 Flash + Vendor Index',
+            };
+          });
+          res.status(HttpStatus.OK).json({
+            recommendations: mapped,
+            modelUsed: SERVER_CONFIG.GEMINI_MODEL,
+          });
+          return;
+        }
+      } catch (error) {
+        console.warn('Gemini recommendation fallback triggered:', error);
+      }
+
+      const fallback = buildCuratedRecommendations({
+        name,
+        category,
+        city,
+        targetBudget,
+        expectedGuests,
+      });
+      res.status(HttpStatus.OK).json({
+        recommendations: fallback,
+        modelUsed: SERVER_CONFIG.CURATED_FALLBACK_ID,
+        fallbackNotice:
+          'Using verified regional hospitality directory with 5–10% contingency and vendor checkpoint guardrails.',
+      });
+    }
+  );
+
+  app.post(
+    '/api/ai/search-agent',
+    async (req: Request, res: Response): Promise<void> => {
+      const body = (req.body || {}) as SearchAgentRequestBody;
+      const query =
+        typeof body.query === 'string' ? sanitizeInputText(body.query) : '';
+      const mode = body.mode || 'discussion';
+      const eventContext =
+        typeof body.eventContext === 'string'
+          ? sanitizeInputText(body.eventContext)
+          : '';
+
+      if (!query) {
+        res
+          .status(HttpStatus.BAD_REQUEST)
+          .json({ error: 'A search or fact-check query is required.' });
         return;
       }
-    } catch (error) {
-      console.warn('Gemini recommendation fallback triggered:', error);
-    }
 
-    const fallback = buildCuratedRecommendations({
-      name,
-      category,
-      city,
-      targetBudget,
-      expectedGuests,
-    });
-    res.json({
-      recommendations: fallback,
-      modelUsed: 'atelier-curated-fallback',
-      fallbackNotice:
-        'Using verified regional hospitality directory with 5–10% contingency and vendor checkpoint guardrails.',
-    });
-  });
+      const ai = getGeminiClient();
+      if (ai) {
+        try {
+          const modeInstruction =
+            mode === 'fact-check'
+              ? 'You are a rigorous Fact-Check & Event Research Agent connected to real-time Google Search. Verify claims clearly (True, Partially True, or Needs Verification), provide concrete dates and figures, and cite your web sources.'
+              : 'You are a Live Current Events & Event Intelligence Agent connected to real-time Google Search. Discuss current events, cite recent news, check municipal/weather/travel advisories, and help event planners make informed decisions.';
 
-  // Real-Time Google Search Grounded Agent (Current Events, News Citations, Fact-Checking)
-  app.post('/api/ai/search-agent', async (req, res) => {
-    const body = (req.body || {}) as SearchAgentRequestBody;
-    const query = typeof body.query === 'string' ? body.query.trim() : '';
-    const mode = body.mode || 'discussion';
-    const eventContext = body.eventContext || '';
+          const response = await ai.models.generateContent({
+            model: SERVER_CONFIG.GEMINI_MODEL,
+            contents: `Event Context: ${eventContext}\nUser Inquiry (${mode}): ${query}`,
+            config: {
+              systemInstruction: `${modeInstruction}\n\n${PLANNER_SYSTEM_GUARDRAILS}`,
+              tools: [{ googleSearch: {} }],
+            },
+          });
 
-    if (!query) {
-      res
-        .status(400)
-        .json({ error: 'A search or fact-check query is required.' });
-      return;
-    }
+          const answerText =
+            response.text ||
+            'Verified current search results for your inquiry.';
+          const rawChunks =
+            response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+          const citations: GroundingCitation[] = [];
 
-    const ai = getGeminiClient();
-    if (ai) {
-      try {
-        const modeInstruction =
-          mode === 'fact-check'
-            ? 'You are a rigorous Fact-Check & Event Research Agent connected to real-time Google Search. Verify claims clearly (True, Partially True, or Needs Verification), provide concrete dates and figures, and cite your web sources.'
-            : 'You are a Live Current Events & Event Intelligence Agent connected to real-time Google Search. Discuss current events, cite recent news, check municipal/weather/travel advisories, and help event planners make informed decisions.';
+          for (const chunk of rawChunks) {
+            const web = (chunk as { web?: { uri?: string; title?: string } })
+              .web;
+            if (web?.uri) {
+              citations.push({
+                title: web.title || web.uri,
+                uri: web.uri,
+              });
+            }
+          }
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: `Event Context: ${eventContext}\nUser Inquiry (${mode}): ${query}`,
-          config: {
-            systemInstruction: `${modeInstruction}\n\n${PLANNER_SYSTEM_GUARDRAILS}`,
-            tools: [{ googleSearch: {} }],
-          },
-        });
-
-        const answerText =
-          response.text || 'Verified current search results for your inquiry.';
-        const rawChunks =
-          response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-        const citations: GroundingCitation[] = [];
-
-        for (const chunk of rawChunks) {
-          const web = (chunk as { web?: { uri?: string; title?: string } }).web;
-          if (web?.uri) {
+          if (citations.length === 0) {
             citations.push({
-              title: web.title || web.uri,
-              uri: web.uri,
+              title: `Google Search Grounding — "${query.slice(0, 50)}"`,
+              uri: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
             });
           }
-        }
 
-        if (citations.length === 0) {
-          citations.push({
-            title: `Google Search Grounding — "${query.slice(0, 50)}"`,
-            uri: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+          res.status(HttpStatus.OK).json({
+            answer: answerText,
+            citations,
+            grounded: true,
+            timestamp: new Date().toISOString(),
           });
+          return;
+        } catch (error) {
+          console.warn('Gemini search grounding fallback triggered:', error);
         }
-
-        res.json({
-          answer: answerText,
-          citations,
-          grounded: true,
-          timestamp: new Date().toISOString(),
-        });
-        return;
-      } catch (error) {
-        console.warn('Gemini search grounding fallback triggered:', error);
       }
+
+      const encodedQ = encodeURIComponent(query);
+      const fallbackCitations: GroundingCitation[] = [
+        {
+          title: `Google News & Live Web Results: ${query.slice(0, 60)}`,
+          uri: `https://news.google.com/search?q=${encodedQ}`,
+        },
+        {
+          title: `Live Web Fact-Check & Reference Index: ${query.slice(0, 60)}`,
+          uri: `https://www.google.com/search?q=${encodedQ}`,
+        },
+      ];
+
+      const fallbackAnswer =
+        mode === 'fact-check'
+          ? `Fact-Check Assessment for "${query}": Cross-referenced against current regional hospitality, municipal event regulations, and live search indexes (${eventContext || 'Active Event Context'}). Key logistical parameters, 15–30 minute stage transition buffers, 5–10% contingency reserves, and vendor COI/permit checkpoints (typically 21–30 days lead time for outdoor heating/tenting and acoustic amplification) should be verified directly via the cited municipal and news sources below.`
+          : `Live Intelligence Brief for "${query}": Based on current event industry dispatches and regional advisories (${eventContext || 'San Francisco & Sonoma Coast'}), planners are prioritizing 15–30 minute timeline transition buffers, dynamic 5–10% contingency budget margins, and mandatory vendor COI/permit checkpoints around major civic dates. Explore the cited live web links below for real-time updates.`;
+
+      res.status(HttpStatus.OK).json({
+        answer: fallbackAnswer,
+        citations: fallbackCitations,
+        grounded: true,
+        timestamp: new Date().toISOString(),
+      });
     }
-
-    const encodedQ = encodeURIComponent(query);
-    const fallbackCitations: GroundingCitation[] = [
-      {
-        title: `Google News & Live Web Results: ${query.slice(0, 60)}`,
-        uri: `https://news.google.com/search?q=${encodedQ}`,
-      },
-      {
-        title: `Live Web Fact-Check & Reference Index: ${query.slice(0, 60)}`,
-        uri: `https://www.google.com/search?q=${encodedQ}`,
-      },
-    ];
-
-    const fallbackAnswer =
-      mode === 'fact-check'
-        ? `Fact-Check Assessment for "${query}": Cross-referenced against current regional hospitality, municipal event regulations, and live search indexes (${eventContext || 'Active Event Context'}). Key logistical parameters, 15–30 minute stage transition buffers, 5–10% contingency reserves, and vendor COI/permit checkpoints (typically 21–30 days lead time for outdoor heating/tenting and acoustic amplification) should be verified directly via the cited municipal and news sources below.`
-        : `Live Intelligence Brief for "${query}": Based on current event industry dispatches and regional advisories (${eventContext || 'San Francisco & Sonoma Coast'}), planners are prioritizing 15–30 minute timeline transition buffers, dynamic 5–10% contingency budget margins, and mandatory vendor COI/permit checkpoints around major civic dates. Explore the cited live web links below for real-time updates.`;
-
-    res.json({
-      answer: fallbackAnswer,
-      citations: fallbackCitations,
-      grounded: true,
-      timestamp: new Date().toISOString(),
-    });
-  });
+  );
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -535,16 +607,16 @@ In each item's rationale, explicitly note how it respects a 5-10% dynamic contin
   } else {
     const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
+    app.get('*', (_req: Request, res: Response): void => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, SERVER_CONFIG.HOST, (): void => {
     console.log(`Atelier Event Planner running on http://localhost:${PORT}`);
   });
 }
 
-void startServer().catch((err: unknown) => {
+void startServer().catch((err: unknown): void => {
   console.error('Failed to start Atelier server:', err);
 });

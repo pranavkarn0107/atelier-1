@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   Calendar,
@@ -15,6 +15,11 @@ import {
   RotateCcw,
   Users,
 } from 'lucide-react';
+import {
+  BUDGET_TIERS,
+  NOTIFICATION_CONSTANTS,
+  STORAGE_KEYS,
+} from './constants';
 import {
   DEFAULT_USER,
   SEED_EVENTS,
@@ -41,9 +46,11 @@ import {
   ScheduleItem,
   ScheduleStatus,
   TaskStatus,
+  ToastNotification,
   UserProfile,
 } from './types/event';
 import {
+  buildBudgetPersistenceToast,
   calculateBudgetMetrics,
   calculateGuestMetrics,
   calculateTaskMetrics,
@@ -62,6 +69,7 @@ import { IntelligenceTab } from './components/IntelligenceTab';
 import { NewEventModal } from './components/NewEventModal';
 import { AuthModal } from './components/AuthModal';
 import { CollaboratorsModal } from './components/CollaboratorsModal';
+import { ToastContainer } from './components/ToastContainer';
 
 export type ActiveTab =
   | 'overview'
@@ -72,13 +80,17 @@ export type ActiveTab =
   | 'marketplace'
   | 'intelligence';
 
-const EVENTS_STORAGE_KEY = 'atelier_celebration_events_v2';
-const USER_STORAGE_KEY = 'atelier_current_user_v2';
-const TEMPLATES_STORAGE_KEY = 'atelier_templates_v2';
-const THEMES_STORAGE_KEY = 'atelier_themes_v2';
-const ACTIVE_THEME_KEY = 'atelier_active_theme_id_v2';
+const EVENTS_STORAGE_KEY = STORAGE_KEYS.EVENTS;
+const USER_STORAGE_KEY = STORAGE_KEYS.USER;
+const TEMPLATES_STORAGE_KEY = STORAGE_KEYS.TEMPLATES;
+const THEMES_STORAGE_KEY = STORAGE_KEYS.THEMES;
+const ACTIVE_THEME_KEY = STORAGE_KEYS.ACTIVE_THEME;
 
-export default function App() {
+/**
+ * Root application shell orchestrating multi-event state, Firebase Authentication,
+ * Cloud Firestore synchronization, custom UI themes, and workspace navigation tabs.
+ */
+export default function App(): React.ReactElement {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     try {
       const saved = localStorage.getItem(USER_STORAGE_KEY);
@@ -174,36 +186,59 @@ export default function App() {
   }, [events, currentUser]);
 
   const [selectedEventId, setSelectedEventId] = useState<string>(
-    () => accessibleEvents[0]?.id || SEED_EVENTS[0].id
+    (): string => accessibleEvents[0]?.id || SEED_EVENTS[0].id
   );
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
-  const [isNewEventModalOpen, setIsNewEventModalOpen] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [isCollabModalOpen, setIsCollabModalOpen] = useState(false);
+  const [isNewEventModalOpen, setIsNewEventModalOpen] = useState<boolean>(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [isCollabModalOpen, setIsCollabModalOpen] = useState<boolean>(false);
   const [syncNotice, setSyncNotice] = useState<string>(
     'Synced to account & cloud workspace'
   );
+  const [toasts, setToasts] = useState<ToastNotification[]>([]);
+
+  const dismissToast = useCallback((id: string): void => {
+    setToasts((prev): ToastNotification[] =>
+      prev.filter((t): boolean => t.id !== id)
+    );
+  }, []);
+
+  const pushToast = useCallback((toast: ToastNotification): void => {
+    setToasts((prev): ToastNotification[] =>
+      [toast, ...prev].slice(0, NOTIFICATION_CONSTANTS.MAX_VISIBLE_TOASTS)
+    );
+  }, []);
+
+  useEffect((): (() => void) | void => {
+    if (toasts.length === 0) return;
+    const latestId = toasts[toasts.length - 1].id;
+    const timer = window.setTimeout((): void => {
+      dismissToast(latestId);
+    }, NOTIFICATION_CONSTANTS.TOAST_AUTO_DISMISS_MS);
+    return (): void => window.clearTimeout(timer);
+  }, [toasts, dismissToast]);
 
   const currentEvent = useMemo(
-    () =>
-      accessibleEvents.find((e) => e.id === selectedEventId) ||
+    (): CelebrationEvent =>
+      accessibleEvents.find((e): boolean => e.id === selectedEventId) ||
       accessibleEvents[0] ||
       events[0],
     [accessibleEvents, selectedEventId, events]
   );
 
   const activeTheme = useMemo(
-    () => themes.find((t) => t.id === activeThemeId) || themes[0],
+    (): DashboardTheme =>
+      themes.find((t): boolean => t.id === activeThemeId) || themes[0],
     [themes, activeThemeId]
   );
 
-  const canEditCurrentEvent = useMemo(() => {
+  const canEditCurrentEvent = useMemo((): boolean => {
     if (!currentUser) return false;
     return canUserEditEvent(currentEvent, currentUser.email, currentUser.uid);
   }, [currentEvent, currentUser]);
 
   // Persist to localStorage
-  useEffect(() => {
+  useEffect((): void => {
     try {
       localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(events));
     } catch {
@@ -211,7 +246,7 @@ export default function App() {
     }
   }, [events]);
 
-  useEffect(() => {
+  useEffect((): void => {
     try {
       localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
     } catch {
@@ -219,7 +254,7 @@ export default function App() {
     }
   }, [templates]);
 
-  useEffect(() => {
+  useEffect((): void => {
     try {
       localStorage.setItem(THEMES_STORAGE_KEY, JSON.stringify(themes));
       localStorage.setItem(ACTIVE_THEME_KEY, activeThemeId);
@@ -228,7 +263,9 @@ export default function App() {
     }
   }, [themes, activeThemeId]);
 
-  const syncEventToServer = async (updatedEvent: CelebrationEvent) => {
+  const syncEventToServer = async (
+    updatedEvent: CelebrationEvent
+  ): Promise<void> => {
     try {
       void syncEventToFirestore(updatedEvent);
       const res = await fetch(`/api/events/${updatedEvent.id}`, {
@@ -246,11 +283,11 @@ export default function App() {
 
   const updateCurrentEvent = (
     updater: (evt: CelebrationEvent) => CelebrationEvent
-  ) => {
-    setEvents((prev) =>
-      prev.map((evt) => {
+  ): void => {
+    setEvents((prev): CelebrationEvent[] =>
+      prev.map((evt): CelebrationEvent => {
         if (evt.id !== currentEvent.id) return evt;
-        const updated = {
+        const updated: CelebrationEvent = {
           ...updater(evt),
           lastSyncedAt: new Date().toISOString(),
         };
@@ -343,24 +380,52 @@ export default function App() {
   };
 
   // Budget Handlers
-  const handleAddBudgetItem = (item: Omit<BudgetItem, 'id'>) => {
+  const handleAddBudgetItem = (item: Omit<BudgetItem, 'id'>): void => {
     const created: BudgetItem = {
       ...item,
       id: `bdg-${Date.now()}`,
     };
-    updateCurrentEvent((evt) => ({
+    updateCurrentEvent((evt): CelebrationEvent => ({
       ...evt,
       budgetItems: [...evt.budgetItems, created],
     }));
+    const toast = buildBudgetPersistenceToast({
+      action: 'created',
+      item: created,
+      confirmedHeadcount: guestMetrics.confirmedHeadcount,
+      targetBudget: currentEvent.targetBudget,
+    });
+    pushToast(toast);
+    setSyncNotice(toast.title);
+  };
+
+  const handleUpdateBudgetItem = (updatedItem: BudgetItem): void => {
+    updateCurrentEvent((evt): CelebrationEvent => ({
+      ...evt,
+      budgetItems: evt.budgetItems.map((b): BudgetItem =>
+        b.id === updatedItem.id ? updatedItem : b
+      ),
+    }));
+    const toast = buildBudgetPersistenceToast({
+      action: 'updated',
+      item: updatedItem,
+      confirmedHeadcount: guestMetrics.confirmedHeadcount,
+      targetBudget: currentEvent.targetBudget,
+    });
+    pushToast(toast);
+    setSyncNotice(toast.title);
   };
 
   const handleUpdatePaymentStatus = (
     itemId: string,
     paymentStatus: PaymentStatus
-  ) => {
-    updateCurrentEvent((evt) => ({
+  ): void => {
+    const existingItem = currentEvent.budgetItems.find(
+      (b): boolean => b.id === itemId
+    );
+    updateCurrentEvent((evt): CelebrationEvent => ({
       ...evt,
-      budgetItems: evt.budgetItems.map((b) => {
+      budgetItems: evt.budgetItems.map((b): BudgetItem => {
         if (b.id !== itemId) return b;
         const effectiveTotal =
           b.costType === 'per-guest'
@@ -370,25 +435,69 @@ export default function App() {
           paymentStatus === 'paid'
             ? effectiveTotal
             : paymentStatus === 'deposit-paid'
-            ? Math.round(effectiveTotal * 0.5)
+            ? Math.round(effectiveTotal * BUDGET_TIERS.DEPOSIT_PAYMENT_RATIO)
             : 0;
         return { ...b, paymentStatus, paidAmount };
       }),
     }));
+    if (existingItem) {
+      const effectiveTotal =
+        existingItem.costType === 'per-guest'
+          ? existingItem.unitActual * guestMetrics.confirmedHeadcount
+          : existingItem.unitActual;
+      const paidAmount =
+        paymentStatus === 'paid'
+          ? effectiveTotal
+          : paymentStatus === 'deposit-paid'
+          ? Math.round(effectiveTotal * BUDGET_TIERS.DEPOSIT_PAYMENT_RATIO)
+          : 0;
+      const updatedRecord: BudgetItem = {
+        ...existingItem,
+        paymentStatus,
+        paidAmount,
+      };
+      const toast = buildBudgetPersistenceToast({
+        action: 'payment-updated',
+        item: updatedRecord,
+        confirmedHeadcount: guestMetrics.confirmedHeadcount,
+        targetBudget: currentEvent.targetBudget,
+      });
+      pushToast(toast);
+      setSyncNotice(toast.title);
+    }
   };
 
-  const handleDeleteBudgetItem = (itemId: string) => {
-    updateCurrentEvent((evt) => ({
+  const handleDeleteBudgetItem = (itemId: string): void => {
+    updateCurrentEvent((evt): CelebrationEvent => ({
       ...evt,
-      budgetItems: evt.budgetItems.filter((b) => b.id !== itemId),
+      budgetItems: evt.budgetItems.filter((b): boolean => b.id !== itemId),
     }));
   };
 
-  const handleUpdateTargetBudget = (newTarget: number) => {
-    updateCurrentEvent((evt) => ({
+  const handleUpdateTargetBudget = (newTarget: number): void => {
+    updateCurrentEvent((evt): CelebrationEvent => ({
       ...evt,
       targetBudget: newTarget,
     }));
+    const ceilingItem: BudgetItem = {
+      id: `ceiling-${currentEvent.id}`,
+      title: `${currentEvent.name} Target Budget Ceiling`,
+      vendor: 'Workspace Financial Control',
+      category: 'Venue & Rentals',
+      costType: 'fixed',
+      unitEstimated: newTarget,
+      unitActual: newTarget,
+      paidAmount: budgetMetrics.totalPaid,
+      paymentStatus: 'planned',
+    };
+    const toast = buildBudgetPersistenceToast({
+      action: 'target-updated',
+      item: ceilingItem,
+      confirmedHeadcount: guestMetrics.confirmedHeadcount,
+      targetBudget: newTarget,
+    });
+    pushToast(toast);
+    setSyncNotice(`Target budget ceiling updated to $${newTarget.toLocaleString('en-US')}`);
   };
 
   // Guest Handlers
@@ -949,9 +1058,12 @@ export default function App() {
               <BudgetTab
                 budgetMetrics={budgetMetrics}
                 onAddBudgetItem={handleAddBudgetItem}
+                onUpdateBudgetItem={handleUpdateBudgetItem}
                 onUpdatePaymentStatus={handleUpdatePaymentStatus}
                 onDeleteBudgetItem={handleDeleteBudgetItem}
                 onUpdateTargetBudget={handleUpdateTargetBudget}
+                latestBudgetToast={toasts[0] || null}
+                onDismissBudgetToast={dismissToast}
               />
             )}
 
@@ -988,7 +1100,7 @@ export default function App() {
                 onSaveAsTemplate={handleSaveAsTemplate}
                 onImportTemplateAsNewEvent={handleImportTemplateAsNewEvent}
                 onApplyTemplateToCurrent={handleApplyTemplateToCurrent}
-                onSelectTheme={(t) => setActiveThemeId(t.id)}
+                onSelectTheme={(t): void => setActiveThemeId(t.id)}
                 onCreateCustomTheme={handleCreateCustomTheme}
               />
             )}
@@ -1017,18 +1129,20 @@ export default function App() {
         </div>
       </footer>
 
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
       <NewEventModal
         isOpen={isNewEventModalOpen}
         currentUser={currentUser}
-        onClose={() => setIsNewEventModalOpen(false)}
+        onClose={(): void => setIsNewEventModalOpen(false)}
         onCreateEvent={handleCreateEvent}
       />
 
       <AuthModal
         isOpen={isAuthModalOpen}
         currentUser={currentUser}
-        onClose={() => setIsAuthModalOpen(false)}
-        onAuthenticate={(user) => {
+        onClose={(): void => setIsAuthModalOpen(false)}
+        onAuthenticate={(user): void => {
           setCurrentUser(user);
           setSyncNotice(`Authenticated as ${user.email}`);
         }}
@@ -1039,7 +1153,7 @@ export default function App() {
         event={currentEvent}
         currentUser={currentUser}
         canEdit={canEditCurrentEvent}
-        onClose={() => setIsCollabModalOpen(false)}
+        onClose={(): void => setIsCollabModalOpen(false)}
         onInviteCollaborator={handleInviteCollaborator}
         onRemoveCollaborator={handleRemoveCollaborator}
         onUpdateEventDetails={handleUpdateEventDetails}
@@ -1047,3 +1161,4 @@ export default function App() {
     </div>
   );
 }
+

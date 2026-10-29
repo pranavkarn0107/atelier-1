@@ -33,6 +33,10 @@ interface OverviewTabProps {
   onUpdateTargetBudget: (newTarget: number) => void;
 }
 
+/**
+ * Renders the executive event overview dashboard, KPI telemetry cards, vendor verification checkpoints,
+ * and the interactive headcount-to-budget simulator.
+ */
 export const OverviewTab: React.FC<OverviewTabProps> = ({
   event,
   taskMetrics,
@@ -43,7 +47,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   heroBg = '#0F172A',
   onToggleTaskStatus,
   onNavigateTab,
-}) => {
+}): React.ReactElement => {
   // Interactive What-If Headcount Simulator state (defaults to current confirmed headcount)
   const [simulatedHeadcount, setSimulatedHeadcount] = useState<number | null>(null);
   const activeSimGuests =

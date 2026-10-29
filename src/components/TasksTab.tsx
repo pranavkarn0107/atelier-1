@@ -24,13 +24,16 @@ const PHASES: ('All' | TaskPhase)[] = [
   'Day-Of Execution',
 ];
 
+/**
+ * Renders the 4-phase production task checklist with search, phase/status filtering, and milestone creation.
+ */
 export const TasksTab: React.FC<TasksTabProps> = ({
   tasks,
   taskMetrics,
   onAddTask,
   onUpdateTaskStatus,
   onDeleteTask,
-}) => {
+}): React.ReactElement => {
   const [selectedPhase, setSelectedPhase] = useState<'All' | TaskPhase>('All');
   const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all');
   const [searchQuery, setSearchQuery] = useState('');

@@ -4,123 +4,137 @@
 
 ---
 
-## Key Features
+## Project Architecture
 
-### 1. Executive Dashboard & Live Headcount-to-Budget Modeling (`Overview`)
-- **Readiness Score & KPI Strip**: Real-time calculation of overall event execution readiness (`0–100%`), task completion progress across 4 production phases, committed budget vs. target ceiling, confirmed headcount, and run-of-show schedule blocks.
-- **Interactive Headcount-to-Budget Simulator**: Live slider that models how changes in guest count dynamically affect variable per-guest line items (catering, sommelier pairings, stationery) alongside fixed venue and production costs.
-- **Priority Action Queue & Dietary Breakdown**: Instant visibility into high-priority open tasks and confirmed guest dietary requirements (*Standard*, *Vegetarian*, *Vegan*, *Gluten-Free*).
+### System Overview
+- **Frontend SPA (`src/`)**: React 19, TypeScript (`strict: true`, `noImplicitAny: true`, `noUnusedLocals: true`, `noUnusedParameters: true`), Tailwind CSS v4 (`@tailwindcss/vite`), Recharts (`recharts`), and Lucide Icons (`lucide-react`).
+- **Centralized Domain Constants (`src/constants.ts`)**: Strongly-typed enums and `as const` objects defining HTTP status codes (`HttpStatus`), event budget tiers and dynamic contingency reserve rates (`BUDGET_TIERS`), guest headcount & collaborator limits (`GUEST_LIMITS`), run-of-show transition buffer thresholds (`TIMELINE_CONSTANTS`), readiness weights (`READINESS_THRESHOLDS`), and input validation boundaries (`VALIDATION_LIMITS`).
+- **Pure Business Logic Engine (`src/utils/eventCalculations.ts`)**: Decoupled, deterministic calculation and validation functions with full JSDoc documentation covering guest headcount aggregation, fixed vs. per-guest cost scaling, >10% category overrun detection, dynamic 5–10% contingency reserves, 15-minute stage transition buffer checks, vendor verification checkpoints, and RBAC access control.
+- **Backend Server (`server.ts`)**: Node.js + Express server (`port 3000`) mounting Vite middleware in development and serving static production assets, exposing REST endpoints (`/api/events`, `/api/templates`, `/api/themes`, `/api/ai/recommend`, `/api/ai/search-agent`).
+- **Real-Time Budget Notification & Persistence Confirmation (`src/components/ToastContainer.tsx`, `src/components/BudgetTab.tsx`)**:
+  - Alerts the user in real time via an accessible ARIA `role="status"` / `aria-live="polite"` toast notification stack and inline ledger confirmation banner whenever a budget item is created, updated via inline edit mode, or has its payment status / target ceiling modified.
+  - Automatically flags **Significant Budget Items** (`>= $1,000` effective commitment or `>= 5%` of the event's target budget ceiling) and confirms persistence across `localStorage`, Express `/api/events/:id`, and **Cloud Firestore**.
+- **Cloud & Persistence (`src/firebase.ts`, `firestore.rules`, `firebase-blueprint.json`)**:
+  - **Firebase Authentication** (Google OAuth popup + Email/Account profiles) and **Cloud Firestore** (`ai-studio-ateliercelebrati-88c5042e-beeb-4cec-a2ec-8330edfae850`).
+  - Dual-persistence across Firestore, Express server state, and browser `localStorage`.
 
-### 2. Automated Cost Ledger, Recharts Analytics & Overrun Alerts (`Budget`)
-- **Fixed vs. Per-Guest Automated Scaling**: Line items configured as `per-guest` automatically multiply by the confirmed guest headcount (`confirmedGuests + confirmedPlusOnes`), while `fixed` fees remain constant.
-- **Recharts Projected vs. Actual Visualizations**:
-  - **Total Projected vs. Actual Progress Bar**: Dual-track progress bar comparing **Projected (Estimated)** baseline against **Actual (Committed)** spend with a live **Disbursed / Paid** overlay and **Actual / Projected Ratio**.
-  - **Category Comparison BarChart (`recharts`)**: Grouped bar chart comparing Projected vs. Actual spending across *Venue & Rentals*, *Catering & Beverage*, *Floral & Production*, *Entertainment & AV*, *Attire & Stationery*, and *Logistics & Staffing*.
-  - **Category Spending Donut PieChart (`recharts`)**: Interactive pie chart with a mode toggle (**Actual Spend** vs. **Projected**) and click-to-filter category slices.
-- **>10% Projected Overrun Warning System**: Automatically detects any budget category or line item exceeding its projected amount by more than 10% (`actual > projected * 1.1`), rendering a top-level variance alert banner, highlighting affected bars and rows in amber, and placing exclamation icons (`AlertCircle`) next to flagged categories and ledger items.
-
-### 3. Dynamic Milestone Task Checklist (`Tasks`)
-- **4-Phase Production Workflow**: Organize tasks across *Pre-Event*, *Venue & Catering*, *Guest Experience*, and *Day-Of Execution*.
-- **Search, Filter & Inline Status Updates**: Filter by phase or status (`todo`, `in-progress`, `completed`), search by keyword or assignee, and add validated task milestones.
-
-### 4. Guest RSVP, Plus-One & Table Assignment Manager (`Guests`)
-- **Real-Time Headcount Aggregation**: Updating a guest's RSVP status (`confirmed`, `pending`, `declined`) or adjusting their plus-one count (`+` / `-`) immediately recalculates the confirmed headcount and updates all per-guest budget items across the app.
-- **Dietary & Table Tracking**: Filter guests by RSVP status or dietary restriction and assign seating table numbers.
-
-### 5. Chronological Run-of-Show & Overlap Conflict Detection (`Timeline`)
-- **Automatic Schedule Sorting & Conflict Detection**: Sorts cue blocks chronologically (`HH:MM`) and automatically flags overlapping time windows (`hasConflict`) with the names of conflicting activities.
-
-### 6. Authentication & Multi-User Co-Planner Collaboration
-- **Firebase Authentication**: Supports Email/Password Sign Up & Log In, Google OAuth Sign-In (`signInWithPopup`), and quick demo workspace switching.
-- **Email Co-Planner Invitations**: Event owners can invite collaborators via email with granular role permissions:
-  - `co-planner`: Full permission to view and edit event details, tasks, and budgets.
-  - `viewer`: Read-only access to the event dashboard.
-
-### 7. Template & Theme Marketplace (`Marketplace`)
-- **Publish & Share Templates**: Save any active event plan (tasks, budget items, and run-of-show schedule) as a **Public Marketplace** or **Private Vault** blueprint.
-- **Import & Merge Blueprints**: Browse community templates, spin up a new event from a template (**Import as New Event**), or merge a template's tasks and budget items into your active event (**Merge into Current**).
-- **Custom UI Theme Studio**: Switch between curated workspace palettes (*Atelier Warm Alabaster*, *Botanical Conservatory Sage*, *Symphony Midnight Indigo*) or create and apply custom UI themes with canvas, hero, and accent color pickers.
-
-### 8. AI Recommendation Engine & Real-Time Google Search Concierge (`AI & Search`)
-- **Tailored Vendor, Décor & Entertainment Engine (`POST /api/ai/recommend`)**: Powered by `@google/genai` (`gemini-3.8-flash`) with structured JSON schema output, suggesting **Venues**, **Caterers**, **Photographers**, **Decorations**, and **Entertainment** calibrated to the event's category, date, city, guest count, and target budget—complete with 1-click **Add to Budget** and **Add Task** actions.
-- **Google Search Grounded Research & Fact-Check Agent (`POST /api/ai/search-agent`)**: Uses `gemini-3.8-flash` with `tools: [{ googleSearch: {} }]` to discuss current events, cite recent news, and fact-check claims with clickable web citations extracted from `groundingMetadata.groundingChunks`.
-
----
-
-## Architecture & Tech Stack
-
-- **Frontend**: React 19, TypeScript, Tailwind CSS v4 (`@tailwindcss/vite`), Recharts (`recharts`), Lucide Icons (`lucide-react`).
-- **Backend**: Node.js + Express (`server.ts`) with Vite middleware in development and static asset serving in production (`port 3000`).
-- **Cloud & Persistence**:
-  - **Firebase Authentication** & **Cloud Firestore** (`src/firebase.ts`, `firestore.rules`, `firebase-blueprint.json`).
-  - **REST API & Local Storage Sync**: Automatic dual-persistence across Firestore, Express memory store, and browser `localStorage`.
-- **AI Integration**: Server-side `@google/genai` SDK (`gemini-3.8-flash`) for structured vendor recommendations and real-time Google Search grounding.
-
----
-
-## Project Structure
-
+### Directory Layout
 ```text
+├── eslint.config.mjs                # Flat ESLint config (explicit return types, no floating promises & Firestore rules)
 ├── firebase-applet-config.json      # Provisioned Firebase project & Firestore database config
 ├── firebase-blueprint.json          # Firestore schema blueprint for events, collaborators & templates
 ├── firestore.rules                  # Hardened Firestore security rules (RBAC & schema validation)
-├── security_spec.md                 # Security specification & access control invariants
+├── tsconfig.json                    # Strict TypeScript compiler configuration
 ├── server.ts                        # Express + Vite server & @google/genai API routes (/api/*)
 ├── src/
-│   ├── App.tsx                      # Root workspace shell, navigation, auth & state orchestration
-│   ├── firebase.ts                  # Firebase Auth + Firestore initialization & error handling
+│   ├── App.tsx                      # Root workspace shell, navigation, auth, toast stack & state orchestration
+│   ├── constants.ts                 # Centralized enums & const objects (budget tiers, notification thresholds, security headers)
+│   ├── firebase.ts                  # Firebase Auth + Firestore initialization & structured error handling
+│   ├── planner.test.ts              # Primary unit test suite (budget edge cases, toast persistence, empty inputs, date formatting)
 │   ├── components/
-│   │   ├── OverviewTab.tsx          # Executive summary, KPIs & live headcount-to-budget slider
-│   │   ├── BudgetTab.tsx            # Recharts Projected vs. Actual charts, >10% warnings & ledger
+│   │   ├── OverviewTab.tsx          # Executive summary, KPIs, vendor checkpoints & headcount simulator
+│   │   ├── BudgetTab.tsx            # Recharts Projected vs. Actual charts, >10% warnings, inline editor & ledger
+│   │   ├── ToastContainer.tsx       # Real-time accessible toast notification stack for budget persistence
 │   │   ├── TasksTab.tsx             # 4-phase milestone checklist & task creation form
 │   │   ├── GuestsTab.tsx            # RSVP manager, plus-one steppers & dietary breakdown
-│   │   ├── TimelineTab.tsx          # Run-of-show cue sheet & overlap conflict detector
+│   │   ├── TimelineTab.tsx          # Run-of-show cue sheet, overlap conflict & 15m buffer detector
 │   │   ├── MarketplaceTab.tsx       # Public/private template marketplace & Custom Theme Studio
 │   │   ├── IntelligenceTab.tsx      # AI Vendor Recommendations & Google Search Grounded Agent
+│   │   ├── NewEventModal.tsx        # New event creation modal
 │   │   ├── AuthModal.tsx            # Sign Up, Log In, Google Auth & demo account switcher
 │   │   └── CollaboratorsModal.tsx   # Co-planner email invitations & event detail editor
 │   ├── data/
 │   │   └── seedEvents.ts            # Deterministic seed events, templates & dashboard themes
 │   ├── types/
-│   │   └── event.ts                 # TypeScript interfaces for events, tasks, budgets & themes
+│   │   └── event.ts                 # TypeScript interfaces for events, tasks, budgets, toasts & themes
 │   └── utils/
-│       ├── eventCalculations.ts     # Pure calculation & validation engine
-│       └── eventCalculations.test.ts# Unit test suite (node:test + node:assert/strict)
+│       ├── eventCalculations.ts     # Pure calculation, significant budget detection, toast builder & validation engine
+│       └── eventCalculations.test.ts# Extended unit test suite
 └── package.json
 ```
 
 ---
 
-## Getting Started
+## Gemini Prompt Schema & Production Guardrails
+
+All Gemini interactions are executed server-side in `server.ts` using the official `@google/genai` SDK (`gemini-3.8-flash`).
+
+### 1. System Instruction Guardrails (`PLANNER_SYSTEM_GUARDRAILS`)
+Both AI endpoints enforce three domain guardrails:
+1. **Realistic Buffer Intervals**: All event timelines and vendor load-in/strike schedules include realistic **15–30 minute transition buffer intervals** between event stages.
+2. **Dynamic Contingency Budget Margins (5–10%)**: Preserves a dynamic **5–10% contingency budget reserve** (`5%` for intimate gatherings, `7.5%` for 40+ guest receptions, `10%` for 80+ guest galas or categories exceeding projected spend by >10%).
+3. **Vendor Verification Checkpoints**: Requires explicit checkpoints for **Certificate of Insurance (COI)**, municipal/fire permits, dedicated allergen kitchen lines, and contract deposit milestones.
+
+### 2. Structured Vendor Recommendation Schema (`POST /api/ai/recommend`)
+Requests are sent to `ai.models.generateContent` with `responseMimeType: "application/json"` and the following strict `Type.ARRAY` `responseSchema`:
+
+```json
+{
+  "type": "ARRAY",
+  "items": {
+    "type": "OBJECT",
+    "properties": {
+      "category": {
+        "type": "STRING",
+        "description": "Must be one of: Venue, Caterer, Photographer, Decoration, Entertainment"
+      },
+      "name": { "type": "STRING" },
+      "specialty": { "type": "STRING" },
+      "estimatedCost": { "type": "NUMBER" },
+      "costType": {
+        "type": "STRING",
+        "description": "Must be fixed or per-guest"
+      },
+      "rationale": { "type": "STRING" },
+      "location": { "type": "STRING" },
+      "rating": { "type": "STRING" }
+    },
+    "required": [
+      "category",
+      "name",
+      "specialty",
+      "estimatedCost",
+      "costType",
+      "rationale",
+      "location",
+      "rating"
+    ]
+  }
+}
+```
+
+### 3. Real-Time Google Search Grounding Schema (`POST /api/ai/search-agent`)
+Uses `gemini-3.8-flash` with `tools: [{ googleSearch: {} }]` to discuss current events, cite recent news, or fact-check claims. Web citations are extracted from `response.candidates[0].groundingMetadata.groundingChunks` into `{ title: string; uri: string }[]`.
+
+---
+
+## Getting Started & Test Execution Instructions
 
 ### 1. Environment Variables
 Copy `.env.example` to `.env` and configure your Gemini API key:
-
 ```bash
 GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 APP_URL="http://localhost:3000"
 ```
 
-### 2. Install Dependencies
+### 2. Install Dependencies & Start Dev Server
 ```bash
 npm install
-```
-
-### 3. Run the Development Server
-Starts the full-stack Express + Vite server on `http://localhost:3000`:
-
-```bash
 npm run dev
 ```
 
-### 4. Run Unit Tests
-Pure business logic and validators in `src/utils/eventCalculations.ts` are tested using Node's built-in test runner via `tsx`:
-
+### 3. Execute Unit Tests
+Run the automated unit test suites (`src/planner.test.ts` and `src/utils/eventCalculations.test.ts`) using Node's test runner via `tsx`:
 ```bash
-npx --yes tsx --test src/utils/eventCalculations.test.ts
+npm test
+```
+Or invoke `src/planner.test.ts` directly:
+```bash
+npx --yes tsx --test src/planner.test.ts
 ```
 
-### 5. Production Build
+### 4. TypeScript Strict Check & Production Build
 ```bash
+npm run lint
 npm run build
 ```

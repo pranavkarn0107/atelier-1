@@ -169,3 +169,25 @@ export interface SearchAgentMessage {
   timestamp: string;
   mode?: 'discussion' | 'fact-check' | 'news';
 }
+
+export type ToastVariant = 'significant' | 'success' | 'warning' | 'info';
+
+export type BudgetToastAction =
+  | 'created'
+  | 'updated'
+  | 'payment-updated'
+  | 'target-updated';
+
+export interface ToastNotification {
+  id: string;
+  title: string;
+  message: string;
+  variant: ToastVariant;
+  isSignificant: boolean;
+  effectiveAmount: number;
+  category: BudgetCategory;
+  action: BudgetToastAction;
+  persistedAt: string;
+  persistenceChannel: string;
+}
+

@@ -11,12 +11,15 @@ interface AuthModalProps {
   onAuthenticate: (user: UserProfile) => void;
 }
 
+/**
+ * Modal dialog for user authentication (Email/Password login, sign up, Google OAuth popup, and demo profile switching).
+ */
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   currentUser,
   onClose,
   onAuthenticate,
-}) => {
+}): React.ReactElement | null => {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
