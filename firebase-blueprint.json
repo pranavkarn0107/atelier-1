@@ -1,0 +1,395 @@
+{
+  "entities": {
+    "Event": {
+      "title": "Event",
+      "description": "A celebration or event plan owned by a user and shared with invited co-planners.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Title of the celebration or event",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "category": {
+          "type": "string",
+          "description": "Classification of the event",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "date": {
+          "type": "string",
+          "description": "ISO date of the event (YYYY-MM-DD)",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "venueName": {
+          "type": "string",
+          "description": "Primary venue name",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "city": {
+          "type": "string",
+          "description": "City and state/country of the venue",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "targetBudget": {
+          "type": "number",
+          "description": "Target budget ceiling in USD"
+        },
+        "expectedGuests": {
+          "type": "number",
+          "description": "Expected guest capacity"
+        },
+        "leadPlanner": {
+          "type": "string",
+          "description": "Name of the lead event architect",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Immutable Firebase UID of the event creator",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "description": "Immutable email address of the event creator",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "collaboratorEmails": {
+          "type": "array",
+          "description": "Bounded list (max 10) of invited collaborator email addresses with edit access"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the event was created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the event was last modified"
+        }
+      },
+      "required": [
+        "name",
+        "category",
+        "date",
+        "venueName",
+        "city",
+        "targetBudget",
+        "expectedGuests",
+        "leadPlanner",
+        "ownerId",
+        "ownerEmail",
+        "collaboratorEmails",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Collaborator": {
+      "title": "Collaborator",
+      "description": "An invited co-planner granted permission to view and edit an event.",
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "role": {
+          "type": "string",
+          "enum": ["co-planner", "viewer"]
+        },
+        "invitedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["invited", "active"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "eventId",
+        "email",
+        "role",
+        "invitedByUid",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A production task belonging to an event.",
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 200
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "Pre-Event",
+            "Venue & Catering",
+            "Guest Experience",
+            "Day-Of Execution"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["todo", "in-progress", "completed"]
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["high", "medium", "low"]
+        },
+        "dueDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "assignee": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "collaboratorEmails": {
+          "type": "array",
+          "description": "Bounded list (max 10) of invited collaborator emails for query enforcement"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "eventId",
+        "title",
+        "phase",
+        "status",
+        "priority",
+        "dueDate",
+        "assignee",
+        "authorId",
+        "collaboratorEmails",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "BudgetItem": {
+      "title": "BudgetItem",
+      "description": "A fixed or per-guest expense line item belonging to an event.",
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160
+        },
+        "vendor": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "Venue & Rentals",
+            "Catering & Beverage",
+            "Floral & Production",
+            "Entertainment & AV",
+            "Attire & Stationery",
+            "Logistics & Staffing"
+          ]
+        },
+        "costType": {
+          "type": "string",
+          "enum": ["fixed", "per-guest"]
+        },
+        "unitEstimated": {
+          "type": "number"
+        },
+        "unitActual": {
+          "type": "number"
+        },
+        "paidAmount": {
+          "type": "number"
+        },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["planned", "deposit-paid", "paid"]
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "collaboratorEmails": {
+          "type": "array",
+          "description": "Bounded list (max 10) of invited collaborator emails for query enforcement"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "eventId",
+        "title",
+        "vendor",
+        "category",
+        "costType",
+        "unitEstimated",
+        "unitActual",
+        "paidAmount",
+        "paymentStatus",
+        "authorId",
+        "collaboratorEmails",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "EventTemplate": {
+      "title": "EventTemplate",
+      "description": "A reusable celebration event template shared publicly or privately in the marketplace.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 400
+        },
+        "category": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public", "private"]
+        },
+        "targetBudget": {
+          "type": "number"
+        },
+        "expectedGuests": {
+          "type": "number"
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "category",
+        "visibility",
+        "targetBudget",
+        "expectedGuests",
+        "authorId",
+        "authorName",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/events/{eventId}": {
+      "schema": { "$ref": "#/entities/Event" },
+      "description": "Root celebration events owned by a user or shared with invited co-planners."
+    },
+    "/events/{eventId}/collaborators/{collaboratorId}": {
+      "schema": { "$ref": "#/entities/Collaborator" },
+      "description": "Co-planners invited via email to view and edit the parent event."
+    },
+    "/events/{eventId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Tasks and milestones associated with an event."
+    },
+    "/events/{eventId}/budgetItems/{itemId}": {
+      "schema": { "$ref": "#/entities/BudgetItem" },
+      "description": "Fixed and per-guest budget line items associated with an event."
+    },
+    "/templates/{templateId}": {
+      "schema": { "$ref": "#/entities/EventTemplate" },
+      "description": "Public and private celebration templates in the marketplace."
+    }
+  }
+}

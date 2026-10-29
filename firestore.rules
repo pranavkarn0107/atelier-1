@@ -1,0 +1,410 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Master Gate Relational Helpers for /events/{eventId} (Single-doc operations only)
+    function eventDoc(eventId) {
+      return get(/databases/$(database)/documents/events/$(eventId));
+    }
+
+    function eventExists(eventId) {
+      return exists(/databases/$(database)/documents/events/$(eventId));
+    }
+
+    function isEventOwner(eventId) {
+      return isVerifiedUser() &&
+        eventExists(eventId) &&
+        eventDoc(eventId).data.ownerId == request.auth.uid;
+    }
+
+    function isEventMember(eventId) {
+      return isVerifiedUser() &&
+        eventExists(eventId) &&
+        (
+          eventDoc(eventId).data.ownerId == request.auth.uid ||
+          (
+            request.auth.token.email is string &&
+            request.auth.token.email in eventDoc(eventId).data.collaboratorEmails
+          )
+        );
+    }
+
+    // Validation Blueprint: Event
+    function isValidEvent(data) {
+      return data.keys().hasAll([
+          'name', 'category', 'date', 'venueName', 'city',
+          'targetBudget', 'expectedGuests', 'leadPlanner',
+          'ownerId', 'ownerEmail', 'collaboratorEmails',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name', 'category', 'date', 'venueName', 'city',
+          'targetBudget', 'expectedGuests', 'leadPlanner',
+          'ownerId', 'ownerEmail', 'collaboratorEmails',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 120 &&
+        data.category is string && data.category.size() >= 2 && data.category.size() <= 80 &&
+        data.date is string && data.date.size() == 10 && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+        data.venueName is string && data.venueName.size() >= 2 && data.venueName.size() <= 120 &&
+        data.city is string && data.city.size() >= 2 && data.city.size() <= 80 &&
+        data.targetBudget is number && data.targetBudget >= 0 && data.targetBudget <= 100000000 &&
+        data.expectedGuests is number && data.expectedGuests >= 1 && data.expectedGuests <= 100000 &&
+        data.leadPlanner is string && data.leadPlanner.size() >= 2 && data.leadPlanner.size() <= 80 &&
+        isValidId(data.ownerId) &&
+        data.ownerEmail is string && data.ownerEmail.size() >= 3 && data.ownerEmail.size() <= 160 &&
+        data.collaboratorEmails is list && data.collaboratorEmails.size() <= 10 &&
+        (data.collaboratorEmails.size() == 0 || (data.collaboratorEmails[0] is string && data.collaboratorEmails[0].size() >= 3 && data.collaboratorEmails[0].size() <= 160)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: Collaborator
+    function isValidCollaborator(data, eventId) {
+      return data.keys().hasAll([
+          'eventId', 'email', 'role', 'invitedByUid', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'eventId', 'email', 'role', 'invitedByUid', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.eventId == eventId &&
+        isValidId(data.eventId) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.role in ['co-planner', 'viewer'] &&
+        isValidId(data.invitedByUid) &&
+        data.status in ['invited', 'active'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: Task
+    function isValidTask(data, eventId) {
+      return data.keys().hasAll([
+          'eventId', 'title', 'phase', 'status', 'priority',
+          'dueDate', 'assignee', 'authorId', 'collaboratorEmails', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'eventId', 'title', 'phase', 'status', 'priority',
+          'dueDate', 'assignee', 'authorId', 'collaboratorEmails', 'createdAt', 'updatedAt'
+        ]) &&
+        data.eventId == eventId &&
+        isValidId(data.eventId) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 200 &&
+        data.phase in ['Pre-Event', 'Venue & Catering', 'Guest Experience', 'Day-Of Execution'] &&
+        data.status in ['todo', 'in-progress', 'completed'] &&
+        data.priority in ['high', 'medium', 'low'] &&
+        data.dueDate is string && data.dueDate.size() == 10 && data.dueDate.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+        data.assignee is string && data.assignee.size() >= 2 && data.assignee.size() <= 80 &&
+        isValidId(data.authorId) &&
+        data.collaboratorEmails is list && data.collaboratorEmails.size() <= 10 &&
+        (data.collaboratorEmails.size() == 0 || (data.collaboratorEmails[0] is string && data.collaboratorEmails[0].size() >= 3 && data.collaboratorEmails[0].size() <= 160)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: BudgetItem
+    function isValidBudgetItem(data, eventId) {
+      return data.keys().hasAll([
+          'eventId', 'title', 'vendor', 'category', 'costType',
+          'unitEstimated', 'unitActual', 'paidAmount', 'paymentStatus',
+          'authorId', 'collaboratorEmails', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'eventId', 'title', 'vendor', 'category', 'costType',
+          'unitEstimated', 'unitActual', 'paidAmount', 'paymentStatus',
+          'authorId', 'collaboratorEmails', 'createdAt', 'updatedAt'
+        ]) &&
+        data.eventId == eventId &&
+        isValidId(data.eventId) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 160 &&
+        data.vendor is string && data.vendor.size() >= 2 && data.vendor.size() <= 120 &&
+        data.category in [
+          'Venue & Rentals', 'Catering & Beverage', 'Floral & Production',
+          'Entertainment & AV', 'Attire & Stationery', 'Logistics & Staffing'
+        ] &&
+        data.costType in ['fixed', 'per-guest'] &&
+        data.unitEstimated is number && data.unitEstimated >= 0 && data.unitEstimated <= 10000000 &&
+        data.unitActual is number && data.unitActual >= 0 && data.unitActual <= 10000000 &&
+        data.paidAmount is number && data.paidAmount >= 0 && data.paidAmount <= 10000000 &&
+        data.paymentStatus in ['planned', 'deposit-paid', 'paid'] &&
+        isValidId(data.authorId) &&
+        data.collaboratorEmails is list && data.collaboratorEmails.size() <= 10 &&
+        (data.collaboratorEmails.size() == 0 || (data.collaboratorEmails[0] is string && data.collaboratorEmails[0].size() >= 3 && data.collaboratorEmails[0].size() <= 160)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: EventTemplate
+    function isValidTemplate(data) {
+      return data.keys().hasAll([
+          'title', 'description', 'category', 'visibility',
+          'targetBudget', 'expectedGuests', 'authorId', 'authorName',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'title', 'description', 'category', 'visibility',
+          'targetBudget', 'expectedGuests', 'authorId', 'authorName',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+        data.description is string && data.description.size() >= 2 && data.description.size() <= 400 &&
+        data.category is string && data.category.size() >= 2 && data.category.size() <= 80 &&
+        data.visibility in ['public', 'private'] &&
+        data.targetBudget is number && data.targetBudget >= 0 && data.targetBudget <= 100000000 &&
+        data.expectedGuests is number && data.expectedGuests >= 1 && data.expectedGuests <= 100000 &&
+        isValidId(data.authorId) &&
+        data.authorName is string && data.authorName.size() >= 2 && data.authorName.size() <= 80 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Collection: /templates/{templateId}
+    match /templates/{templateId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(templateId) &&
+        (existing().visibility == 'public' || existing().authorId == request.auth.uid);
+
+      allow list: if isVerifiedUser() &&
+        (existing().visibility == 'public' || existing().authorId == request.auth.uid);
+
+      allow create: if isVerifiedUser() &&
+        isValidId(templateId) &&
+        isValidTemplate(incoming()) &&
+        incoming().authorId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser() &&
+        isValidId(templateId) &&
+        isValidTemplate(incoming()) &&
+        existing().authorId == request.auth.uid &&
+        incoming().authorId == existing().authorId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'description', 'category', 'visibility',
+          'targetBudget', 'expectedGuests', 'authorName', 'updatedAt'
+        ]);
+
+      allow delete: if isVerifiedUser() &&
+        isValidId(templateId) &&
+        existing().authorId == request.auth.uid;
+    }
+
+    // Collection: /events/{eventId}
+    match /events/{eventId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(eventId) &&
+        (
+          existing().ownerId == request.auth.uid ||
+          (request.auth.token.email is string && request.auth.token.email in existing().collaboratorEmails)
+        );
+
+      allow list: if isVerifiedUser() &&
+        (
+          existing().ownerId == request.auth.uid ||
+          (request.auth.token.email is string && request.auth.token.email in existing().collaboratorEmails)
+        );
+
+      allow create: if isVerifiedUser() &&
+        isValidId(eventId) &&
+        isValidEvent(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().ownerEmail == request.auth.token.email &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser() &&
+        isValidId(eventId) &&
+        isValidEvent(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().ownerEmail == existing().ownerEmail &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          // Tier 1: Event Owner can update event details or manage collaboratorEmails
+          (
+            existing().ownerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'category', 'date', 'venueName', 'city',
+              'targetBudget', 'expectedGuests', 'leadPlanner',
+              'collaboratorEmails', 'updatedAt'
+            ])
+          ) ||
+          // Tier 2: Invited Co-Planner can update event details/budget target, but NOT collaboratorEmails
+          (
+            request.auth.token.email is string &&
+            request.auth.token.email in existing().collaboratorEmails &&
+            incoming().collaboratorEmails == existing().collaboratorEmails &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'category', 'date', 'venueName', 'city',
+              'targetBudget', 'expectedGuests', 'leadPlanner',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isVerifiedUser() &&
+        isValidId(eventId) &&
+        existing().ownerId == request.auth.uid;
+
+      // Subcollection: /events/{eventId}/collaborators/{collaboratorId}
+      match /collaborators/{collaboratorId} {
+        allow get: if isValidId(eventId) &&
+          isValidId(collaboratorId) &&
+          isEventMember(eventId);
+
+        allow list: if isVerifiedUser() &&
+          (
+            existing().invitedByUid == request.auth.uid ||
+            existing().email == request.auth.token.email
+          );
+
+        allow create: if isVerifiedUser() &&
+          isValidId(eventId) &&
+          isValidId(collaboratorId) &&
+          isValidCollaborator(incoming(), eventId) &&
+          incoming().invitedByUid == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isEventOwner(eventId);
+
+        allow update: if isVerifiedUser() &&
+          isValidId(eventId) &&
+          isValidId(collaboratorId) &&
+          isValidCollaborator(incoming(), eventId) &&
+          incoming().eventId == existing().eventId &&
+          incoming().email == existing().email &&
+          incoming().invitedByUid == existing().invitedByUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          (
+            (
+              isEventOwner(eventId) &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'updatedAt'])
+            ) ||
+            (
+              request.auth.token.email == existing().email &&
+              existing().status == 'invited' &&
+              incoming().status == 'active' &&
+              incoming().role == existing().role &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+            )
+          );
+
+        allow delete: if isValidId(eventId) &&
+          isValidId(collaboratorId) &&
+          isEventOwner(eventId);
+      }
+
+      // Subcollection: /events/{eventId}/tasks/{taskId}
+      match /tasks/{taskId} {
+        allow get: if isValidId(eventId) &&
+          isValidId(taskId) &&
+          isEventMember(eventId);
+
+        allow list: if isVerifiedUser() &&
+          existing().eventId == eventId &&
+          (
+            existing().authorId == request.auth.uid ||
+            (request.auth.token.email is string && request.auth.token.email in existing().collaboratorEmails)
+          );
+
+        allow create: if isVerifiedUser() &&
+          isValidId(eventId) &&
+          isValidId(taskId) &&
+          isValidTask(incoming(), eventId) &&
+          incoming().authorId == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isEventMember(eventId);
+
+        allow update: if isVerifiedUser() &&
+          isValidId(eventId) &&
+          isValidId(taskId) &&
+          isValidTask(incoming(), eventId) &&
+          incoming().eventId == existing().eventId &&
+          incoming().authorId == existing().authorId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          (existing().status != 'completed' || isEventOwner(eventId)) &&
+          isEventMember(eventId) &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'phase', 'status', 'priority', 'dueDate', 'assignee', 'collaboratorEmails', 'updatedAt'
+          ]);
+
+        allow delete: if isValidId(eventId) &&
+          isValidId(taskId) &&
+          isEventOwner(eventId);
+      }
+
+      // Subcollection: /events/{eventId}/budgetItems/{itemId}
+      match /budgetItems/{itemId} {
+        allow get: if isValidId(eventId) &&
+          isValidId(itemId) &&
+          isEventMember(eventId);
+
+        allow list: if isVerifiedUser() &&
+          existing().eventId == eventId &&
+          (
+            existing().authorId == request.auth.uid ||
+            (request.auth.token.email is string && request.auth.token.email in existing().collaboratorEmails)
+          );
+
+        allow create: if isVerifiedUser() &&
+          isValidId(eventId) &&
+          isValidId(itemId) &&
+          isValidBudgetItem(incoming(), eventId) &&
+          incoming().authorId == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isEventMember(eventId);
+
+        allow update: if isVerifiedUser() &&
+          isValidId(eventId) &&
+          isValidId(itemId) &&
+          isValidBudgetItem(incoming(), eventId) &&
+          incoming().eventId == existing().eventId &&
+          incoming().authorId == existing().authorId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          (existing().paymentStatus != 'paid' || isEventOwner(eventId)) &&
+          isEventMember(eventId) &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'vendor', 'category', 'costType',
+            'unitEstimated', 'unitActual', 'paidAmount', 'paymentStatus', 'collaboratorEmails', 'updatedAt'
+          ]);
+
+        allow delete: if isValidId(eventId) &&
+          isValidId(itemId) &&
+          isEventOwner(eventId);
+      }
+    }
+  }
+}

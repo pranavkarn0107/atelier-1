@@ -1,0 +1,6 @@
+{
+  "name": "Atelier — Celebration & Event Planner",
+  "description": "Responsive celebration and event planning dashboard with dynamic task tracking, automated per-guest and fixed budget calculations, RSVP management, and run-of-show timeline orchestration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
